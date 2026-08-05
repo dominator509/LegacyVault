@@ -8,6 +8,7 @@ export interface ProviderResult {
   content: string;
   model: string;
   usage: ProviderUsage;
+  retryCount: number;
   requestId?: string;
 }
 export interface ProviderRequest {
@@ -25,6 +26,12 @@ export interface AiProvider {
 
 export class ProviderUnavailableError extends Error {
   override readonly name = "ProviderUnavailableError";
+  constructor(
+    message: string,
+    readonly retryCount = 0,
+  ) {
+    super(message);
+  }
 }
 export class ProviderResponseError extends Error {
   override readonly name = "ProviderResponseError";
@@ -47,9 +54,11 @@ export class DeepSeekProvider implements AiProvider {
     private readonly transport: typeof fetch = fetch,
   ) {}
   readiness() {
-    return this.config.apiKey
-      ? { configured: true }
-      : { configured: false, reason: "missing-api-key" };
+    if (!this.config.apiKey)
+      return { configured: false, reason: "missing-api-key" };
+    if (Date.now() < this.#openUntil)
+      return { configured: false, reason: "circuit-open" };
+    return { configured: true };
   }
 
   async invoke(request: ProviderRequest): Promise<ProviderResult> {
@@ -94,9 +103,10 @@ export class DeepSeekProvider implements AiProvider {
           (response.status === 429 || response.status >= 500) &&
           attempt < this.config.maxRetries
         ) {
+          const retryAfter = response.headers.get("retry-after");
           await response.body?.cancel();
           await new Promise((resolve) =>
-            setTimeout(resolve, Math.min(2_000, 250 * 2 ** attempt)),
+            setTimeout(resolve, retryDelayMs(retryAfter, attempt)),
           );
           continue;
         }
@@ -128,6 +138,7 @@ export class DeepSeekProvider implements AiProvider {
             cacheHitTokens: body.usage?.prompt_cache_hit_tokens ?? 0,
             cacheMissTokens: body.usage?.prompt_cache_miss_tokens ?? 0,
           },
+          retryCount: attempt,
           ...(body.id ? { requestId: body.id } : {}),
         };
       } catch (error) {
@@ -141,6 +152,19 @@ export class DeepSeekProvider implements AiProvider {
     if (this.#failureCount >= 3) this.#openUntil = Date.now() + 30_000;
     throw new ProviderUnavailableError(
       lastError instanceof Error ? lastError.name : "DeepSeek request failed",
+      this.config.maxRetries,
     );
   }
+}
+
+function retryDelayMs(retryAfter: string | null, attempt: number): number {
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds) && seconds >= 0)
+      return Math.min(5_000, seconds * 1_000);
+    const date = Date.parse(retryAfter);
+    if (Number.isFinite(date))
+      return Math.min(5_000, Math.max(0, date - Date.now()));
+  }
+  return Math.min(2_000, 250 * 2 ** attempt);
 }

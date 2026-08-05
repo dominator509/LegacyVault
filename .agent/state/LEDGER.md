@@ -60,3 +60,6 @@
 2026-08-05T20:11:06Z | codex | EP-004 | SIG | document_quarantine_test_expected_EICAR_detection_after_PDF_prefix_but_clamd_returned_clean
 2026-08-05T20:11:07Z | codex | EP-004 | HYPOTHESIS | EICAR_signature_requires_canonical_test_file_move_infected_state_transition_to_unit_boundary_keep_exact_real_scanner_proof
 2026-08-05T20:15:26Z | codex | EP-004 | HEARTBEAT | document_quarantine_MIME_size_real_ClamAV_EICAR_MinIO_unit_22_integration_13_build_security_audit_reality_ok
+2026-08-05T20:16:02Z | codex | EP-004 | SIG | ocrmypdf_alpine_17.8.1_pull_exit_1_manifest_not_found
+2026-08-05T20:16:02Z | codex | EP-004 | HYPOTHESIS | official_release_uses_v_prefix_on_primary_image_retry_documented_jbarlow83_ocrmypdf_v17.8.1
+2026-08-05T20:34:30Z | codex | EP-004 | HEARTBEAT | isolated_OCR_persisted_workflow_AI_retry_metrics_unit_24_integration_15_build_security_audit_reality_ok

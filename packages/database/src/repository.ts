@@ -18,6 +18,15 @@ export interface CandidateFactWrite {
   sensitivity: string;
 }
 
+export interface PersistedWorkflow {
+  id: string;
+  kind: string;
+  status: string;
+  completedSteps: string[];
+  nextStep: string | null;
+  version: number;
+}
+
 export class VaultRepository {
   readonly #pool: pg.Pool;
   constructor(databaseUrl: string) {
@@ -153,6 +162,82 @@ export class VaultRepository {
       const row = result.rows[0];
       if (!row) throw new Error("workflow insert returned no row");
       return row;
+    });
+  }
+
+  async getWorkflow(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<PersistedWorkflow> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        kind: string;
+        status: string;
+        completed_steps: string[];
+        next_step: string | null;
+        version: number;
+      }>(
+        "select id,kind,status,completed_steps,next_step,version from workflow_runs where id=$1",
+        [workflowId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("workflow unavailable");
+      return {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        completedSteps: row.completed_steps,
+        nextStep: row.next_step,
+        version: row.version,
+      };
+    });
+  }
+
+  async completeWorkflowStep(
+    context: TenantContext,
+    input: {
+      workflowId: string;
+      expectedVersion: number;
+      step: string;
+      nextStep: string | null;
+    },
+  ): Promise<PersistedWorkflow> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        kind: string;
+        status: string;
+        completed_steps: string[];
+        next_step: string | null;
+        version: number;
+      }>(
+        "update workflow_runs set completed_steps=case when completed_steps ? $1 then completed_steps else completed_steps || jsonb_build_array($1::text) end,next_step=$2,status=case when $2::text is null then 'completed' else 'running' end,last_error_class=null,version=version+1 where id=$3 and version=$4 and status<>'completed' returning id,kind,status,completed_steps,next_step,version",
+        [input.step, input.nextStep, input.workflowId, input.expectedVersion],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("workflow version conflict");
+      return {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        completedSteps: row.completed_steps,
+        nextStep: row.next_step,
+        version: row.version,
+      };
+    });
+  }
+
+  async recordWorkflowFailure(
+    context: TenantContext,
+    workflowId: string,
+    errorClass: string,
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      await client.query(
+        "update workflow_runs set status='failed',last_error_class=$1,version=version+1 where id=$2 and status<>'completed'",
+        [errorClass.slice(0, 120), workflowId],
+      );
     });
   }
 

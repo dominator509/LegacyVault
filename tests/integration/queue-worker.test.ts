@@ -41,6 +41,7 @@ describe("real Valkey workflow queue", () => {
         workflowId,
         organizationId: randomUUID(),
         householdId: randomUUID(),
+        actorId: randomUUID(),
       });
       await queueEvents.waitUntilReady();
       await job.waitUntilFinished(queueEvents, 10_000);

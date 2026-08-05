@@ -20,5 +20,6 @@
 | ADR-016 | Format implementation artifacts but exclude immutable blueprint prose and generated lockfiles | The first format check reported 60 files, predominantly L1-L4 control documents that must not be mechanically rewritten | Accepted |
 | ADR-017 | Permit one explicit lock refresh after reviewed exact manifest changes, followed by frozen install and audit | Workspace packages and approved dependencies added by later graph nodes must update the lockfile without making ordinary installs mutable | Accepted |
 | ADR-018 | Pin the official ClamAV 1.4.5 Debian slim image by digest and expose clamd on loopback only for local document scans | The blueprint requires local malware scanning; the exact image digest makes local proof reproducible and does not imply hosted production verification | Accepted for local and test only |
+| ADR-019 | Run the pinned OCRmyPDF 17.8.1 image as an ephemeral network-disabled, read-only, resource-bounded local process | This proves the blueprint's local OCR path on Windows without installing a mutable host Python toolchain or granting a persistent service access to document data | Accepted for local and test only |
 
 Add a decision before introducing a new canonical name, dependency, provider promise, data category, or exception. Use `.agent/templates/adr-template.md`.

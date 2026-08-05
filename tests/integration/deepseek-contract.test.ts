@@ -81,6 +81,7 @@ describe("DeepSeek HTTP contract", () => {
       cacheHitTokens: 80,
       cacheMissTokens: 20,
     });
+    expect(result.retryCount).toBe(0);
   });
 
   it("retries one transient server response within the configured bound", async () => {
@@ -88,7 +89,7 @@ describe("DeepSeek HTTP contract", () => {
     const server = createServer((_request, response) => {
       attempts += 1;
       if (attempts === 1) {
-        response.writeHead(503);
+        response.writeHead(503, { "retry-after": "0" });
         response.end();
         return;
       }
@@ -121,7 +122,7 @@ describe("DeepSeek HTTP contract", () => {
         mode: "standard",
         maxOutputTokens: 50,
       }),
-    ).resolves.toMatchObject({ content: "{}" });
+    ).resolves.toMatchObject({ content: "{}", retryCount: 1 });
     expect(attempts).toBe(2);
   });
 });

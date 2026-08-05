@@ -257,6 +257,98 @@ export class OcrMyPdfAdapter {
   }
 }
 
+export class DockerOcrMyPdfAdapter {
+  constructor(
+    private readonly config: {
+      dockerExecutable: string;
+      image: string;
+      timeoutMs: number;
+    },
+  ) {
+    if (!config.image.includes("@sha256:"))
+      throw new DocumentValidationError(
+        "OCR container image must be pinned by digest",
+      );
+  }
+
+  async extractSearchablePdf(input: Uint8Array): Promise<Uint8Array> {
+    validateDocumentBytes({
+      bytes: input,
+      declaredMediaType: "application/pdf",
+      maximumBytes: 100 * 1024 * 1024,
+    });
+    const directory = await mkdtemp(
+      join(tmpdir(), "legacy-vault-ocr-container-"),
+    );
+    const source = join(directory, "source.pdf");
+    const output = join(directory, "output.pdf");
+    try {
+      await writeFile(source, input, { mode: 0o600 });
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn(
+          this.config.dockerExecutable,
+          [
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--read-only",
+            "--security-opt",
+            "no-new-privileges",
+            "--pids-limit",
+            "256",
+            "--memory",
+            "1g",
+            "--cpus",
+            "2",
+            "--tmpfs",
+            "/tmp:rw,noexec,nosuid,size=512m",
+            "--volume",
+            `${directory}:/work`,
+            "--workdir",
+            "/work",
+            this.config.image,
+            "--skip-text",
+            "--output-type",
+            "pdf",
+            "--",
+            "source.pdf",
+            "output.pdf",
+          ],
+          {
+            shell: false,
+            windowsHide: true,
+            stdio: ["ignore", "ignore", "pipe"],
+          },
+        );
+        let diagnostic = "";
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk: string) => {
+          if (diagnostic.length < 2_000) diagnostic += chunk;
+        });
+        const timer = setTimeout(() => child.kill(), this.config.timeoutMs);
+        child.once("error", (error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+        child.once("exit", (code, signal) => {
+          clearTimeout(timer);
+          if (code === 0) resolve();
+          else
+            reject(
+              new Error(
+                `container OCR failed (${signal ?? code}): ${diagnostic.trim()}`,
+              ),
+            );
+        });
+      });
+      return new Uint8Array(await readFile(output));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+}
+
 export class DocumentObjectStore {
   readonly #client: S3Client;
   constructor(private readonly config: ObjectStoreConfig) {

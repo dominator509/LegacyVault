@@ -26,6 +26,7 @@ const result = {
     cacheHitTokens: 80,
     cacheMissTokens: 20,
   },
+  retryCount: 2,
 };
 
 describe("AI policy gateway", () => {
@@ -39,7 +40,10 @@ describe("AI policy gateway", () => {
 
   it("blocks prohibited content before the provider boundary", async () => {
     const provider = new RecordingAiProvider(result);
-    const gateway = new AiPolicyGateway(provider, () => undefined);
+    const metrics: unknown[] = [];
+    const gateway = new AiPolicyGateway(provider, (metric) =>
+      metrics.push(metric),
+    );
     await expect(
       gateway.execute({
         organizationId: "org-1",
@@ -56,6 +60,13 @@ describe("AI policy gateway", () => {
       }),
     ).rejects.toBeInstanceOf(AiPolicyError);
     expect(provider.requests).toHaveLength(0);
+    expect(metrics).toEqual([
+      expect.objectContaining({
+        outcome: "policy-blocked",
+        dlpFindingsCount: 1,
+        errorClass: "DlpPolicyViolation",
+      }),
+    ]);
   });
 
   it("requires affirmative purpose-matched consent", async () => {
@@ -104,6 +115,7 @@ describe("AI policy gateway", () => {
       buildPrompt(envelope).stablePrefix,
     );
     expect(metrics).toHaveLength(1);
+    expect(metrics[0]).toMatchObject({ retryCount: 2 });
   });
 
   it("isolates exact cache keys between tenants", () => {

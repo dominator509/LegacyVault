@@ -69,6 +69,7 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 # 12. Surprises & Discoveries
 - ioredis 6 requires the installed named `Redis` export under NodeNext, and BullMQ 6 requires an explicit `QueueEvents` instance for completion waits.
 - The production worker start command is intentionally withheld until real handlers are composed; the tested queue/worker factory has no success-producing fallback handler.
+- The original workflow persistence schema has no subject type or subject identifier. Queue-only document identifiers would not be authoritative across replay, so document-handler composition is deferred until the relationship is added through an explicit migration decision.
 
 # 13. Decision Log
 # 13. Decision Log

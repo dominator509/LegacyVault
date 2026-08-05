@@ -6,7 +6,12 @@ import {
   type PromptEnvelope,
 } from "./canonical.js";
 import { scanDlp, type DlpFinding } from "./dlp.js";
-import type { AiProvider, ProviderUsage } from "./provider.js";
+import {
+  ProviderUnavailableError,
+  type AiProvider,
+  type ProviderResult,
+  type ProviderUsage,
+} from "./provider.js";
 
 export class AiPolicyError extends Error {
   override readonly name = "AiPolicyError";
@@ -18,6 +23,7 @@ export class AiPolicyError extends Error {
   }
 }
 export interface GatewayMetric {
+  outcome: "success" | "policy-blocked" | "provider-error" | "schema-error";
   taskFamily: string;
   promptVersion: string;
   model: string;
@@ -28,6 +34,7 @@ export interface GatewayMetric {
   schemaSuccess: boolean;
   retryCount: number;
   estimatedCostUsd: number;
+  errorClass?: string;
 }
 export interface GatewayRequest<T> {
   organizationId: string;
@@ -73,19 +80,39 @@ export class AiPolicyGateway {
     if (!request.consentGranted)
       throw new AiPolicyError("affirmative external AI consent is required");
     const findings = scanDlp(request.envelope.content);
-    if (findings.length)
+    if (findings.length) {
+      this.emitMetric({
+        ...emptyMetric(request),
+        outcome: "policy-blocked",
+        dlpFindingsCount: findings.length,
+        errorClass: "DlpPolicyViolation",
+      });
       throw new AiPolicyError(
         "prohibited content blocked before provider boundary",
         findings,
       );
+    }
     const prompt = buildPrompt(request.envelope);
     const started = performance.now();
-    const result = await this.provider.invoke({
-      ...prompt,
-      model: request.model,
-      mode: request.mode,
-      maxOutputTokens: request.maxOutputTokens,
-    });
+    let result: ProviderResult;
+    try {
+      result = await this.provider.invoke({
+        ...prompt,
+        model: request.model,
+        mode: request.mode,
+        maxOutputTokens: request.maxOutputTokens,
+      });
+    } catch (error) {
+      this.emitMetric({
+        ...emptyMetric(request),
+        outcome: "provider-error",
+        latencyMs: performance.now() - started,
+        retryCount:
+          error instanceof ProviderUnavailableError ? error.retryCount : 0,
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
+    }
     let schemaSuccess = false;
     try {
       const parsed = request.schema.parse(JSON.parse(result.content));
@@ -97,6 +124,7 @@ export class AiPolicyGateway {
           result.usage.outputTokens * request.estimatedOutputCostPerMillion) /
         1_000_000;
       this.emitMetric({
+        outcome: schemaSuccess ? "success" : "schema-error",
         taskFamily: request.envelope.promptFamily,
         promptVersion: request.envelope.promptVersion,
         model: result.model,
@@ -105,9 +133,31 @@ export class AiPolicyGateway {
         latencyMs: performance.now() - started,
         dlpFindingsCount: 0,
         schemaSuccess,
-        retryCount: 0,
+        retryCount: result.retryCount,
         estimatedCostUsd: cost,
+        ...(!schemaSuccess ? { errorClass: "SchemaValidationError" } : {}),
       });
     }
   }
+}
+
+function emptyMetric<T>(request: GatewayRequest<T>): GatewayMetric {
+  return {
+    outcome: "provider-error",
+    taskFamily: request.envelope.promptFamily,
+    promptVersion: request.envelope.promptVersion,
+    model: request.model,
+    mode: request.mode,
+    usage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+    },
+    latencyMs: 0,
+    dlpFindingsCount: 0,
+    schemaSuccess: false,
+    retryCount: 0,
+    estimatedCostUsd: 0,
+  };
 }
