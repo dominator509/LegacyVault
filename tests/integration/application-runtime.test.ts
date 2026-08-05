@@ -528,6 +528,87 @@ describe("composed application runtime", () => {
           Buffer.from(searchablePdf.subarray(0, 5)).toString("ascii"),
         ).toBe("%PDF-");
         searchablePdf.fill(0);
+        const extractionKey = `runtime-manual-extraction-${randomUUID()}`;
+        const extractionInput = {
+          documentId: documentUpload?.document.id ?? "",
+          workflowId: documentProcessing?.workflow.id ?? "",
+          expectedWorkflowVersion: 3,
+          idempotencyKey: extractionKey,
+          candidates: [
+            {
+              fieldKey: "insurance.policy-number",
+              value: "LV-1002",
+              locator: "page:1",
+              sensitivity: "sensitive",
+              confidence: 1,
+            },
+          ],
+        } as const;
+        const extraction =
+          await runtime.dependencies.completeManualDocumentExtraction?.(
+            identity,
+            extractionInput,
+          );
+        const extractionReplay =
+          await runtime.dependencies.completeManualDocumentExtraction?.(
+            identity,
+            extractionInput,
+          );
+        expect(extractionReplay).toEqual(extraction);
+        expect(extraction).toMatchObject({
+          documentId: documentUpload?.document.id,
+          workflowId: documentProcessing?.workflow.id,
+          status: "completed",
+          candidates: [{ status: "candidate", version: 1 }],
+        });
+        await client.query("begin");
+        await client.query(
+          "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+          [organizationId, householdId],
+        );
+        const extracted = await client.query<{
+          id: string;
+          typed_value_encrypted: Buffer;
+          key_version: number;
+          status: string;
+          locator: string;
+          workflow_status: string;
+          next_step: string | null;
+        }>(
+          "select f.id,f.typed_value_encrypted,f.key_version,f.status,e.locator,w.status as workflow_status,w.next_step from facts f join evidence e on e.id=(f.evidence_ids->>0)::uuid join workflow_runs w on w.subject_id=f.source_id where f.source_id=$1 and f.field_key='insurance.policy-number'",
+          [documentUpload?.document.id],
+        );
+        await client.query("commit");
+        expect(extracted.rows[0]).toMatchObject({
+          status: "candidate",
+          locator: "page:1",
+          workflow_status: "completed",
+          next_step: null,
+        });
+        const extractedEnvelope = JSON.parse(
+          extracted.rows[0]?.typed_value_encrypted.toString("utf8") ?? "",
+        ) as EncryptedEnvelope;
+        const extractionHouseholdKey =
+          await scanKeyStore.getOrCreateActiveKey(identity);
+        try {
+          const extractedValue = decryptEnvelope(
+            extractedEnvelope,
+            extractionHouseholdKey.plaintextKey,
+            {
+              organizationId,
+              householdId,
+              recordId: extracted.rows[0]?.id ?? "",
+              purpose: "fact-value:insurance.policy-number",
+              keyVersion: extracted.rows[0]?.key_version ?? 0,
+            },
+          );
+          expect(Buffer.from(extractedValue).toString("utf8")).toBe(
+            '"LV-1002"',
+          );
+          extractedValue.fill(0);
+        } finally {
+          extractionHouseholdKey.plaintextKey.fill(0);
+        }
         await scanObjectStore.deleteObject(
           derivative.rows[0]?.object_key ?? "",
         );

@@ -71,6 +71,22 @@ export interface ServerDependencies {
       idempotencyKey: string;
     },
   ) => Promise<StartedDocumentProcessing>;
+  completeManualDocumentExtraction?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      documentId: string;
+      workflowId: string;
+      expectedWorkflowVersion: number;
+      idempotencyKey: string;
+      candidates: readonly {
+        fieldKey: string;
+        value: unknown;
+        locator: string;
+        sensitivity: string;
+        confidence?: number;
+      }[];
+    },
+  ) => Promise<unknown>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -85,7 +101,8 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.createCheckout ||
       !dependencies.startDocumentUpload ||
       !dependencies.createDocumentUploadUrl ||
-      !dependencies.completeDocumentUpload)
+      !dependencies.completeDocumentUpload ||
+      !dependencies.completeManualDocumentExtraction)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",

@@ -15,6 +15,7 @@ import {
   type EncryptedEnvelope,
 } from "@legacy/crypto";
 import { VaultRepository } from "@legacy/database/repository";
+import { scanDlp } from "@legacy/ai-gateway";
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
 import { generateReport } from "@legacy/reports";
 import type { CandidateFact } from "@legacy/domain";
@@ -413,6 +414,73 @@ export function createApplicationRuntime(environment: Environment): {
           actorId: identity.actorId,
         });
         return started;
+      },
+      completeManualDocumentExtraction: async (identity, input) => {
+        const requestFingerprint = createHash("sha256")
+          .update(
+            JSON.stringify({
+              documentId: input.documentId,
+              workflowId: input.workflowId,
+              expectedWorkflowVersion: input.expectedWorkflowVersion,
+              candidates: input.candidates,
+            }),
+          )
+          .digest("hex");
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        const plaintextValues: Buffer[] = [];
+        try {
+          const candidates = input.candidates.map((candidate) => {
+            const serialized = JSON.stringify(candidate.value);
+            if (serialized === undefined)
+              throw new Error("manual extraction value is invalid");
+            const prohibited = scanDlp(serialized).filter(
+              (finding) => finding !== "prompt-injection",
+            );
+            if (prohibited.length)
+              throw new Error("manual extraction contains prohibited content");
+            const plaintext = Buffer.from(serialized, "utf8");
+            plaintextValues.push(plaintext);
+            const id = randomUUID();
+            return {
+              id,
+              evidenceId: randomUUID(),
+              fieldKey: candidate.fieldKey,
+              ciphertext: Buffer.from(
+                JSON.stringify(
+                  encryptEnvelope(plaintext, householdKey.plaintextKey, {
+                    organizationId: identity.organizationId,
+                    householdId: identity.householdId,
+                    recordId: id,
+                    purpose: `fact-value:${candidate.fieldKey}`,
+                    keyVersion: householdKey.keyVersion,
+                  }),
+                ),
+              ),
+              keyVersion: householdKey.keyVersion,
+              sourceType: "document",
+              sourceId: input.documentId,
+              evidenceIds: [] as string[],
+              ...(candidate.confidence === undefined
+                ? {}
+                : { confidence: candidate.confidence }),
+              sensitivity: candidate.sensitivity,
+              locator: candidate.locator,
+            };
+          });
+          return repository.completeManualDocumentExtraction(identity, {
+            documentId: input.documentId,
+            workflowId: input.workflowId,
+            expectedWorkflowVersion: input.expectedWorkflowVersion,
+            idempotencyKey: input.idempotencyKey,
+            requestFingerprint,
+            capturedAt: new Date().toISOString(),
+            candidates,
+          });
+        } finally {
+          for (const plaintext of plaintextValues) plaintext.fill(0);
+          householdKey.plaintextKey.fill(0);
+        }
       },
     },
     async close() {

@@ -28,6 +28,7 @@ const authorizationScopes: {
   purpose: string;
 }[] = [];
 let observedExportKey: Uint8Array | undefined;
+let observedManualExtraction: unknown;
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
@@ -58,6 +59,15 @@ const server = buildServer({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
   }),
+  completeManualDocumentExtraction: async (_resolved, input) => {
+    observedManualExtraction = input;
+    return {
+      documentId: input.documentId,
+      workflowId: input.workflowId,
+      status: "completed",
+      candidates: [{ id: randomUUID(), status: "candidate", version: 1 }],
+    };
+  },
 });
 
 beforeAll(async () => {
@@ -367,5 +377,71 @@ describe("vault API persistence", () => {
       action: "approve",
       purpose: "vault.billing.checkout",
     });
+  });
+
+  it("validates and authorizes manual document extraction without confirming candidates", async () => {
+    const documentId = randomUUID();
+    const workflowId = randomUUID();
+    const extracted = await server.inject({
+      method: "POST",
+      url: "/v1/extractions/manual",
+      headers: {
+        "idempotency-key": `manual-extraction-${randomUUID()}`,
+        "if-match": "3",
+      },
+      payload: {
+        documentId,
+        workflowId,
+        candidates: [
+          {
+            fieldKey: "insurance.policy-number",
+            value: "LV-1002",
+            locator: "page:1",
+            sensitivity: "sensitive",
+            confidence: 1,
+          },
+        ],
+      },
+    });
+    expect(extracted.statusCode).toBe(201);
+    expect(extracted.json()).toMatchObject({
+      documentId,
+      workflowId,
+      status: "completed",
+      candidates: [{ status: "candidate", version: 1 }],
+    });
+    expect(observedManualExtraction).toMatchObject({
+      documentId,
+      workflowId,
+      expectedWorkflowVersion: 3,
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "insurance",
+      action: "create",
+      purpose: "vault.extraction.manual",
+    });
+
+    const blocked = await server.inject({
+      method: "POST",
+      url: "/v1/extractions/manual",
+      headers: {
+        "idempotency-key": `manual-extraction-${randomUUID()}`,
+        "if-match": "3",
+      },
+      payload: {
+        documentId,
+        workflowId,
+        candidates: [
+          {
+            fieldKey: "insurance.notes",
+            value: "password: hunter2",
+            locator: "page:1",
+            sensitivity: "sensitive",
+          },
+        ],
+      },
+    });
+    expect(blocked.statusCode).toBe(400);
+    expect(blocked.json()).toMatchObject({ title: "Prohibited content" });
   });
 });

@@ -155,6 +155,22 @@ export async function registerVaultRoutes(
         idempotencyKey: string;
       },
     ) => Promise<unknown>;
+    completeManualDocumentExtraction?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        documentId: string;
+        workflowId: string;
+        expectedWorkflowVersion: number;
+        idempotencyKey: string;
+        candidates: readonly {
+          fieldKey: string;
+          value: unknown;
+          locator: string;
+          sensitivity: string;
+          confidence?: number;
+        }[];
+      },
+    ) => Promise<unknown>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -398,6 +414,121 @@ export async function registerVaultRoutes(
       return reply.header("cache-control", "no-store").send(signed);
     },
   );
+
+  server.post("/v1/extractions/manual", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    const body = objectBody(request.body);
+    const key = idempotencyKey(request);
+    const documentId = requiredUuid(body, "documentId");
+    const workflowId = requiredUuid(body, "workflowId");
+    const expectedWorkflowVersion = Number(request.headers["if-match"]);
+    if (
+      !Number.isSafeInteger(expectedWorkflowVersion) ||
+      expectedWorkflowVersion < 1
+    )
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "a valid if-match workflow version is required",
+      );
+    if (
+      !Array.isArray(body.candidates) ||
+      body.candidates.length < 1 ||
+      body.candidates.length > 50
+    )
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "candidates must contain between 1 and 50 items",
+      );
+    const candidates = body.candidates.map((candidate, index) => {
+      const item = objectBody(candidate);
+      const fieldKey = requiredString(item, "fieldKey");
+      const category = factCategory(fieldKey);
+      const locator = requiredString(item, "locator");
+      if (locator.length > 256)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          `candidates[${index}].locator is too long`,
+        );
+      const sensitivity = requiredString(item, "sensitivity");
+      if (!["standard", "sensitive", "highly-sensitive"].includes(sensitivity))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          `candidates[${index}].sensitivity is invalid`,
+        );
+      if (!Object.hasOwn(item, "value"))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          `candidates[${index}].value is required`,
+        );
+      const serialized = JSON.stringify(item.value);
+      if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          `candidates[${index}].value is invalid`,
+        );
+      const prohibited = scanDlp(serialized).filter(
+        (finding) => finding !== "prompt-injection",
+      );
+      if (prohibited.length)
+        throw new ApiProblem(
+          400,
+          "Prohibited content",
+          `candidates[${index}].value contains prohibited ${prohibited.join(", ")}`,
+        );
+      if (
+        item.confidence !== undefined &&
+        (typeof item.confidence !== "number" ||
+          item.confidence < 0 ||
+          item.confidence > 1)
+      )
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          `candidates[${index}].confidence is invalid`,
+        );
+      return {
+        fieldKey,
+        category,
+        value: item.value,
+        locator,
+        sensitivity,
+        ...(typeof item.confidence === "number"
+          ? { confidence: item.confidence }
+          : {}),
+      };
+    });
+    for (const candidate of candidates)
+      await dependencies.authorizeIdentity?.(identity, {
+        category: candidate.category,
+        action: "create",
+        purpose: "vault.extraction.manual",
+      });
+    if (!dependencies.completeManualDocumentExtraction)
+      throw new ApiProblem(
+        503,
+        "Manual extraction unavailable",
+        "Manual extraction is not configured.",
+      );
+    const completed = await dependencies.completeManualDocumentExtraction(
+      identity,
+      {
+        documentId,
+        workflowId,
+        expectedWorkflowVersion,
+        idempotencyKey: key,
+        candidates: candidates.map(
+          ({ category: _category, ...candidate }) => candidate,
+        ),
+      },
+    );
+    return reply.code(201).send(completed);
+  });
 
   server.post<{ Params: { id: string } }>(
     "/v1/documents/:id/complete",

@@ -88,6 +88,10 @@ export interface StartedDocumentProcessing {
   document: { id: string; status: string; version: number };
   workflow: { id: string; status: string; version: number };
 }
+export interface ManualDocumentCandidateWrite extends CandidateFactWrite {
+  evidenceId: string;
+  locator: string;
+}
 export interface DocumentProcessingInput extends DocumentUploadRecord {
   workflowId: string;
   workflowStatus: string;
@@ -665,6 +669,129 @@ export class VaultRepository {
       );
       if (workflow.rowCount !== 1)
         throw new Error("document OCR workflow conflict");
+    });
+  }
+
+  async completeManualDocumentExtraction(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      expectedWorkflowVersion: number;
+      idempotencyKey: string;
+      requestFingerprint: string;
+      capturedAt: string;
+      candidates: readonly ManualDocumentCandidateWrite[];
+    },
+  ): Promise<{
+    documentId: string;
+    workflowId: string;
+    status: "completed";
+    candidates: { id: string; status: "candidate"; version: number }[];
+  }> {
+    return this.withTenant(context, async (client) => {
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          input.requestFingerprint,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: {
+            documentId: string;
+            workflowId: string;
+            status: "completed";
+            candidates: {
+              id: string;
+              status: "candidate";
+              version: number;
+            }[];
+          } | null;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (
+          row?.request_hash !== input.requestFingerprint ||
+          !row.response_body
+        )
+          throw new Error("manual extraction idempotency conflict");
+        return row.response_body;
+      }
+      const workflow = await client.query(
+        "select 1 from workflow_runs w join documents d on w.subject_type='Document' and w.subject_id=d.id where w.id=$1 and d.id=$2 and d.status='clean' and w.next_step='classification' and w.version=$3 for update of w",
+        [input.workflowId, input.documentId, input.expectedWorkflowVersion],
+      );
+      if (workflow.rowCount !== 1)
+        throw new Error("manual extraction workflow conflict");
+      const candidates: {
+        id: string;
+        status: "candidate";
+        version: number;
+      }[] = [];
+      for (const candidate of input.candidates) {
+        await client.query(
+          "insert into evidence(id,organization_id,household_id,source_type,source_id,locator,captured_at) values ($1,$2,$3,'document',$4,$5,$6)",
+          [
+            candidate.evidenceId,
+            context.organizationId,
+            context.householdId,
+            input.documentId,
+            candidate.locator,
+            input.capturedAt,
+          ],
+        );
+        const result = await client.query<{
+          id: string;
+          status: "candidate";
+          version: number;
+        }>(
+          "insert into facts(id,organization_id,household_id,field_key,typed_value_encrypted,key_version,status,source_type,source_id,evidence_ids,confidence,sensitivity) values ($1,$2,$3,$4,$5,$6,'candidate','document',$7,$8,$9,$10) returning id,status,version",
+          [
+            candidate.id,
+            context.organizationId,
+            context.householdId,
+            candidate.fieldKey,
+            Buffer.from(candidate.ciphertext),
+            candidate.keyVersion,
+            input.documentId,
+            JSON.stringify([candidate.evidenceId]),
+            candidate.confidence ?? null,
+            candidate.sensitivity,
+          ],
+        );
+        const row = result.rows[0];
+        if (!row) throw new Error("manual candidate insert returned no row");
+        candidates.push(row);
+      }
+      const completed = await client.query(
+        "update workflow_runs set status='completed',completed_steps=completed_steps || '[\"classification\",\"manual-extraction\"]'::jsonb,next_step=null,last_error_class=null,version=version+1 where id=$1 and version=$2 and next_step='classification'",
+        [input.workflowId, input.expectedWorkflowVersion],
+      );
+      if (completed.rowCount !== 1)
+        throw new Error("manual extraction completion conflict");
+      const response = {
+        documentId: input.documentId,
+        workflowId: input.workflowId,
+        status: "completed" as const,
+        candidates,
+      };
+      await client.query(
+        "update idempotency_records set status_code=201,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
     });
   }
 

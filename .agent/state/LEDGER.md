@@ -142,3 +142,6 @@
 2026-08-05T23:36:01Z | codex | EP-004 | SIG | format_check_exit_1_OCR_worker_storage_and_runtime_proof_style_only_type_and_security_ok
 2026-08-05T23:36:01Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
 2026-08-05T23:38:32Z | codex | EP-004 | HEARTBEAT | isolated_digest_pinned_OCR_encrypted_searchable_derivative_checksum_RLS_provenance_next_classification_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T23:44:48Z | codex | EP-004 | SIG | format_check_exit_1_manual_extraction_route_and_repository_style_only_type_security_and_focused_integration_ok
+2026-08-05T23:44:48Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T23:47:05Z | codex | EP-004 | HEARTBEAT | manual_document_extraction_DLP_evidence_encrypted_candidates_idempotent_replay_separate_confirmation_unit_36_integration_38_e2e_2_build_format_security_audit_smoke_ok
