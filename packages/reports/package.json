@@ -1,18 +1,18 @@
 {
-  "name": "@legacy/worker",
+  "name": "@legacy/reports",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@legacy/contracts": "workspace:*",
-    "bullmq": "6.0.8",
-    "ioredis": "6.0.0"
+    "@legacy/domain": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "4.23.8",
     "typescript": "7.0.2"
   }
 }

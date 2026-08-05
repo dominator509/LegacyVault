@@ -1,18 +1,19 @@
 {
-  "name": "@legacy/worker",
+  "name": "@legacy/documents",
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@legacy/contracts": "workspace:*",
-    "bullmq": "6.0.8",
-    "ioredis": "6.0.0"
+    "@aws-sdk/client-s3": "3.1103.0",
+    "@aws-sdk/s3-request-presigner": "3.1103.0"
   },
   "devDependencies": {
-    "tsx": "4.23.8",
     "typescript": "7.0.2"
   }
 }

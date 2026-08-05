@@ -46,3 +46,9 @@
 2026-08-05T19:17:10Z | codex | EP-003 | CONTINUATION_PASS | migrations_RLS_integrity_3_integration_suite_5_format_build_security_audit_reality_ok
 2026-08-05T19:17:10Z | codex | EP-003 | EXTERNAL_DEFERRED | verify_stops_at_missing_DEEPSEEK_API_KEY
 2026-08-05T19:17:10Z | codex | EP-003 | LEASE_RELEASE | M2_and_NODE_DONE_withheld_external_preflight
+2026-08-05T19:18:57Z | codex | EP-004 | LEASE | explicit-implementation-continuation-ADR-009
+2026-08-05T19:27:18Z | codex | EP-004 | SIG | lint_TS2307_test_cannot_resolve_ai_gateway_zod
+2026-08-05T19:27:18Z | codex | EP-004 | HYPOTHESIS | export_gateway_schema_builder_from_package_boundary
+2026-08-05T19:32:50Z | codex | EP-004 | SIG | lint_ioredis6_named_Redis_and_BullMQ6_QueueEvents_required
+2026-08-05T19:32:50Z | codex | EP-004 | HYPOTHESIS | use_installed_named_Redis_export_and_explicit_QueueEvents
+2026-08-05T19:43:01Z | codex | EP-004 | HEARTBEAT | ai_gateway_storage_billing_email_reports_queue_slice_unit_19_integration_9_build_security_audit_reality_ok

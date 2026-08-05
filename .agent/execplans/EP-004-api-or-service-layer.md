@@ -67,10 +67,12 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- ioredis 6 requires the installed named `Redis` export under NodeNext, and BullMQ 6 requires an explicit `QueueEvents` instance for completion waits.
+- The production worker start command is intentionally withheld until real handlers are composed; the tested queue/worker factory has no success-producing fallback handler.
 
 # 13. Decision Log
-- None recorded.
+# 13. Decision Log
+- ADR-017 governs exact AWS SDK, BullMQ, and ioredis lockfile refreshes.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.
