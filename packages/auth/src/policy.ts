@@ -55,17 +55,25 @@ export function authorize(
   const maximumSessionAgeMs = staffRoles.includes(request.role)
     ? 15 * 60 * 1_000
     : 7 * 24 * 60 * 60 * 1_000;
+  const sessionIssuedAt = Date.parse(request.sessionIssuedAt);
   if (
     !Number.isFinite(now) ||
-    now - Date.parse(request.sessionIssuedAt) > maximumSessionAgeMs
+    !Number.isFinite(sessionIssuedAt) ||
+    sessionIssuedAt > now ||
+    now - sessionIssuedAt > maximumSessionAgeMs
   )
     return { allowed: false, reason: "session-expired" };
-  if (
-    mfaRoles.includes(request.role) &&
-    (!request.mfaVerifiedAt ||
-      now - Date.parse(request.mfaVerifiedAt) > 12 * 60 * 60 * 1_000)
-  )
-    return { allowed: false, reason: "mfa-required" };
+  if (mfaRoles.includes(request.role)) {
+    const mfaVerifiedAt = request.mfaVerifiedAt
+      ? Date.parse(request.mfaVerifiedAt)
+      : Number.NaN;
+    if (
+      !Number.isFinite(mfaVerifiedAt) ||
+      mfaVerifiedAt > now ||
+      now - mfaVerifiedAt > 12 * 60 * 60 * 1_000
+    )
+      return { allowed: false, reason: "mfa-required" };
+  }
   if (request.role === "PlatformAdmin")
     return { allowed: false, reason: "permission-denied" };
   if (request.role === "SupportAgent") {
@@ -89,7 +97,7 @@ export function authorize(
     return { allowed: false, reason: "emergency-release-required" };
   return permits(
     request.role,
-    request.grants,
+    request.grants.filter((grant) => grant.purpose === request.purpose),
     request.category,
     request.action,
     request.now,

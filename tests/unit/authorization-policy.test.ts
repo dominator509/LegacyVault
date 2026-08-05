@@ -30,6 +30,32 @@ describe("service authorization policy", () => {
       }),
     ).toEqual({ allowed: false, reason: "mfa-required" });
   });
+  it("rejects future session or MFA timestamps", () => {
+    expect(
+      authorize({
+        role: "Owner",
+        grants: [],
+        category: "insurance",
+        action: "read",
+        purpose: "vault review",
+        now,
+        sessionIssuedAt: "2026-08-05T12:00:01.000Z",
+        mfaVerifiedAt: now,
+      }),
+    ).toEqual({ allowed: false, reason: "session-expired" });
+    expect(
+      authorize({
+        role: "Owner",
+        grants: [],
+        category: "insurance",
+        action: "read",
+        purpose: "vault review",
+        now,
+        sessionIssuedAt: now,
+        mfaVerifiedAt: "2026-08-05T12:00:01.000Z",
+      }),
+    ).toEqual({ allowed: false, reason: "mfa-required" });
+  });
   it("requires bounded owner-approved category access for support", () => {
     const base = {
       role: "SupportAgent" as const,
@@ -57,6 +83,19 @@ describe("service authorization policy", () => {
         },
       }),
     ).toEqual({ allowed: true, reason: "allow" });
+    expect(
+      authorize({
+        ...base,
+        purpose: "unrelated purpose",
+        supportApproval: {
+          approvedByOwnerId: "owner-1",
+          reasonCode: "ticket-verified",
+          categories: ["insurance"],
+          startsAt: "2026-08-05T11:30:00.000Z",
+          expiresAt: "2026-08-05T12:30:00.000Z",
+        },
+      }),
+    ).toEqual({ allowed: false, reason: "permission-denied" });
   });
   it("never grants standing vault access to platform administrators or emergency recipients", () => {
     expect(

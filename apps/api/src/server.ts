@@ -4,11 +4,15 @@ import type { VaultRepository } from "@legacy/database/repository";
 import { registerVaultRoutes, type IdentityResolver } from "./routes/vault.js";
 import { registerBillingRoutes } from "./routes/billing.js";
 import type { StripeAdapter } from "./adapters/stripe.js";
+import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
+import { createApplicationRuntime } from "./runtime.js";
 
 export interface ServerDependencies {
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
   stripe?: StripeAdapter;
+  auth?: AuthHandler;
+  authBaseUrl?: string;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -53,13 +57,33 @@ export function buildServer(dependencies?: ServerDependencies) {
         stripe: dependencies.stripe!,
       }),
     );
+  if (dependencies?.auth && dependencies.authBaseUrl)
+    server.register(async (instance) =>
+      registerAuthRoutes(
+        instance,
+        dependencies.auth!,
+        dependencies.authBaseUrl!,
+      ),
+    );
   return server;
 }
 
 async function main() {
   const environment = loadEnvironment(process.env);
-  const server = buildServer();
-  await server.listen({ host: environment.HOST, port: environment.PORT });
+  const runtime = createApplicationRuntime(environment);
+  const server = buildServer(runtime.dependencies);
+  const shutdown = async () => {
+    await server.close();
+    await runtime.close();
+  };
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
+  try {
+    await server.listen({ host: environment.HOST, port: environment.PORT });
+  } catch (error) {
+    await runtime.close();
+    throw error;
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\\\", "/")}`) {

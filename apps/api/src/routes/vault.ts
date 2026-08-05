@@ -3,6 +3,10 @@ import type {
   TenantContext,
   VaultRepository,
 } from "@legacy/database/repository";
+import {
+  AuthenticationRequiredError,
+  HouseholdSelectionRequiredError,
+} from "@legacy/auth";
 
 export type IdentityResolver = (
   request: FastifyRequest,
@@ -87,15 +91,27 @@ export async function registerVaultRoutes(
     const problem =
       error instanceof ApiProblem
         ? error
-        : new ApiProblem(
-            message.includes("conflict") || message.includes("idempotency")
-              ? 409
-              : 500,
-            message.includes("conflict")
-              ? "Version conflict"
-              : "Request failed",
-            "The request could not be completed.",
-          );
+        : error instanceof AuthenticationRequiredError
+          ? new ApiProblem(
+              401,
+              "Authentication required",
+              "Authentication is required.",
+            )
+          : error instanceof HouseholdSelectionRequiredError
+            ? new ApiProblem(
+                409,
+                "Household selection required",
+                "Select an accessible household.",
+              )
+            : new ApiProblem(
+                message.includes("conflict") || message.includes("idempotency")
+                  ? 409
+                  : 500,
+                message.includes("conflict")
+                  ? "Version conflict"
+                  : "Request failed",
+                "The request could not be completed.",
+              );
     return reply.code(problem.status).type("application/problem+json").send({
       type: "about:blank",
       title: problem.title,

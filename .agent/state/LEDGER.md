@@ -80,3 +80,12 @@
 2026-08-05T21:23:41Z | codex | EP-006 | SIG | auth_schema_compile_exit_1_TypeError_after_async_main
 2026-08-05T21:23:41Z | codex | EP-006 | HYPOTHESIS | migration_API_requires_framework_options_without_instantiated_pool_or_exposes_safe_stack_needed_for_narrow_diagnostic
 2026-08-05T21:36:04Z | codex | EP-006 | HEARTBEAT | BetterAuth_passkey_TOTP_Argon2id_AES_GCM_Ed25519_append_only_audit_unit_32_integration_23_build_security_audit_reality_ok
+2026-08-05T21:48:59Z | codex | EP-006 | SIG | format_check_exit_1_runtime_ts_style_only_typecheck_ok
+2026-08-05T21:48:59Z | codex | EP-006 | HYPOTHESIS | run_authorized_repository_formatter_then_rerun_narrow_format_gate
+2026-08-05T21:50:37Z | codex | EP-006 | SIG | windows_rg_glob_exit_1_literal_asterisk_path_rejected
+2026-08-05T21:50:37Z | codex | EP-006 | DIAGNOSTIC | use_directory_scope_with_rg_g_filters_on_windows
+2026-08-05T21:56:52Z | codex | EP-006 | SIG | lint_and_integration_TS2307_root_test_cannot_resolve_contracts_subpath
+2026-08-05T21:56:52Z | codex | EP-006 | HYPOTHESIS | use_existing_relative_source_import_pattern_for_root_integration_test
+2026-08-05T21:59:57Z | codex | EP-006 | SIG | format_check_exit_1_identity_and_membership_test_style_only_lint_and_integration_ok
+2026-08-05T21:59:57Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_gate
+2026-08-05T22:03:59Z | codex | EP-006 | HEARTBEAT | composed_BetterAuth_PostgreSQL_SMTP_membership_grants_MFA_context_compliance_traceability_unit_33_integration_27_e2e_2_build_format_security_audit_smoke_ok

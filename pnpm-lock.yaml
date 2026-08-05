@@ -32,6 +32,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@legacy/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
       '@legacy/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

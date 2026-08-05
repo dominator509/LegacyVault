@@ -1,8 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createLegacyAuth } from "../../packages/auth/src/index.js";
+import { buildServer } from "../../apps/api/src/server.js";
 import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { runMigrations } from "../../packages/database/src/migrate.js";
+import { VaultRepository } from "../../packages/database/src/repository.js";
 import { readLocalEnvironment } from "../helpers/local-environment.js";
 
 const environment = readLocalEnvironment();
@@ -18,9 +20,25 @@ const runtime = createLegacyAuth({
   sendVerificationEmail: async ({ url }) => void verificationLinks.push(url),
   sendPasswordResetEmail: async () => undefined,
 });
+const repository = new VaultRepository(databaseUrl);
+const server = buildServer({
+  repository,
+  resolveIdentity: async () => {
+    throw new Error("identity resolution is not used by auth endpoints");
+  },
+  auth: runtime.auth,
+  authBaseUrl: "http://127.0.0.1:3001",
+});
 
-beforeAll(async () => runMigrations(databaseUrl));
-afterAll(async () => runtime.close());
+beforeAll(async () => {
+  await runMigrations(databaseUrl);
+  await server.ready();
+});
+afterAll(async () => {
+  await server.close();
+  await repository.close();
+  await runtime.close();
+});
 
 describe("real Better Auth PostgreSQL integration", () => {
   it("creates an unverified account with Argon2id credentials and no session", async () => {
@@ -56,5 +74,28 @@ describe("real Better Auth PostgreSQL integration", () => {
     } finally {
       await client.end();
     }
+  }, 20_000);
+
+  it("serves Better Auth through the Fastify bridge", async () => {
+    const ok = await server.inject({ method: "GET", url: "/api/auth/ok" });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json()).toEqual({ ok: true });
+
+    const email = `bridge-${randomUUID()}@example.test`;
+    const signup = await server.inject({
+      method: "POST",
+      url: "/api/auth/sign-up/email",
+      headers: { origin: "http://127.0.0.1:3000" },
+      payload: {
+        name: "Bridge Integration User",
+        email,
+        password: "bridge password has sufficient length 2026",
+      },
+    });
+    expect(signup.statusCode).toBe(200);
+    expect(signup.json()).toMatchObject({
+      token: null,
+      user: { email, emailVerified: false },
+    });
   }, 20_000);
 });

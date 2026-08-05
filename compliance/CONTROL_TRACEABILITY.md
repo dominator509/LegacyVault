@@ -1,0 +1,24 @@
+# Privacy and Security Control Traceability
+
+Status: engineering evidence only. This document does not constitute counsel,
+vendor, insurance, executive, or regulatory approval.
+
+| Commitment or risk | Technical control | Current proof | Release evidence still required |
+|---|---|---|---|
+| Tenant isolation | Transaction-scoped PostgreSQL RLS context; authenticated user-to-membership resolution | `tests/integration/database-rls.test.ts`; `tests/integration/membership-identity.test.ts` | Production database configuration and penetration test |
+| Account takeover | Better Auth server sessions, passkey WebAuthn verification, TOTP, Argon2id fallback, rate limiting, lockout | `tests/integration/better-auth.test.ts`; `tests/unit/password-hashing.test.ts`; `tests/unit/authorization-policy.test.ts` | Browser passkey/TOTP live-fire and Turnstile deployment |
+| Vault confidentiality | AES-256-GCM envelope encryption with tenant, record, purpose, and version AAD; per-household wrapped DEKs | `tests/unit/cryptography.test.ts`; `tests/integration/local-crypto-config.test.ts` | Production KMS/HSM configuration and key-recovery drill |
+| Unauthorized staff access | Platform administrators have no vault permission; support access requires category-limited, time-bounded owner approval | `packages/auth/src/policy.ts`; `tests/unit/authorization-policy.test.ts` | Persisted JIT grant workflow, revocation live-fire, staff access review |
+| Emergency release abuse | Emergency recipients have no standing access; authorization requires an approved release | `packages/auth/src/policy.ts`; `tests/unit/authorization-policy.test.ts` | Persisted delayed-release workflow, fraud review, staged pilot |
+| Document malware | Quarantine-first object storage and fail-closed ClamAV scan | `tests/integration/document-quarantine.test.ts`; `tests/integration/clamav.test.ts` | Production scanner capacity and failure drill |
+| AI disclosure and prompt injection | Purpose-specific opt-in, DLP/secret detection, minimized canonical prompts, schema validation, fail-closed provider state | `tests/unit/ai-policy-gateway.test.ts`; `tests/integration/deepseek-contract.test.ts` | Current vendor contract/policy archive, counsel approval, authenticated probe |
+| AI does not become truth | AI output remains candidate data; a user confirmation transition is required | `tests/unit/domain-invariants.test.ts`; `tests/integration/vault-api.test.ts` | End-to-end browser confirmation proof |
+| Billing replay or spoofing | Raw-body signature verification, signed tenant metadata, idempotent ordered event persistence | `tests/unit/stripe-signature.test.ts`; `tests/integration/billing-webhook.test.ts` | Authenticated Stripe sandbox checkout/webhook delivery |
+| Privacy requests | Canonical request and export/deletion workflow are created atomically and replay safely | `tests/integration/vault-api.test.ts`; `tests/integration/workflow-persistence.test.ts` | Full export/deletion completion, processor deletion, notice delivery |
+| Audit tampering and data leakage | Content-free canonical HMAC chain and database update/delete prevention | `tests/unit/audit-chain.test.ts`; `tests/integration/audit-store.test.ts` | Production key custody, alerting, and chain-verification drill |
+| Export integrity | Ed25519 signing primitive uses PKCS8 key material | `tests/unit/cryptography.test.ts`; `tests/integration/local-crypto-config.test.ts` | Complete export assembly, verification tool, restore/import drill |
+| Transactional email | Production adapter plus real local SMTP capture | `tests/integration/email-capture.test.ts` | Authenticated Resend delivery, suppression, bounce, and domain proof |
+| Retention and deletion | Category schedule and persisted deletion workflow | `DATA_RETENTION_SCHEDULE.md`; `tests/integration/workflow-persistence.test.ts` | Approved periods, purge workers, backup-expiry proof, legal-hold controls |
+
+The absence of a release-evidence item is a production blocker when the
+corresponding source policy or `PRODUCTION_READINESS.md` requires it.

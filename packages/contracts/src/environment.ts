@@ -16,6 +16,13 @@ const environmentSchema = z
       .transform((value) => value === "true"),
     DATABASE_URL: z.string().url().optional(),
     SESSION_SECRET: z.string().min(43).optional(),
+    API_BASE_URL: z.string().url().optional(),
+    APP_BASE_URL: z.string().url().optional(),
+    EMAIL_FROM: z.string().min(3).optional(),
+    RESEND_API_KEY: z.string().optional(),
+    STRIPE_SECRET_KEY: z.string().optional(),
+    STRIPE_WEBHOOK_SECRET: z.string().optional(),
+    STRIPE_PRICE_ESSENTIAL: z.string().optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && value.LOCAL_ENGINEERING_MODE) {
@@ -38,6 +45,22 @@ const environmentSchema = z
         path: ["SESSION_SECRET"],
         message: "required in production",
       });
+    }
+    for (const field of [
+      "API_BASE_URL",
+      "APP_BASE_URL",
+      "EMAIL_FROM",
+      "RESEND_API_KEY",
+      "STRIPE_SECRET_KEY",
+      "STRIPE_WEBHOOK_SECRET",
+      "STRIPE_PRICE_ESSENTIAL",
+    ] as const) {
+      if (value.NODE_ENV === "production" && !value[field])
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: "required in production",
+        });
     }
   });
 

@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "tsx src/server.ts"
+    "start": "tsx --env-file-if-exists=../../.env src/server.ts"
   },
   "dependencies": {
+    "@legacy/auth": "workspace:*",
     "@legacy/contracts": "workspace:*",
     "@legacy/database": "workspace:*",
     "fastify": "5.11.2",
