@@ -1,0 +1,25 @@
+{
+  "name": "@legacy/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/schema.ts",
+    "./client": "./src/client.ts",
+    "./migrate": "./src/migrate.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "migrate": "tsx --env-file-if-exists=../../.env src/migrate.ts"
+  },
+  "dependencies": {
+    "@legacy/domain": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.4",
+    "tsx": "4.23.8",
+    "typescript": "7.0.2"
+  }
+}
