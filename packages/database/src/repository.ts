@@ -88,6 +88,12 @@ export interface StartedDocumentProcessing {
   document: { id: string; status: string; version: number };
   workflow: { id: string; status: string; version: number };
 }
+export interface DocumentProcessingInput extends DocumentUploadRecord {
+  workflowId: string;
+  workflowStatus: string;
+  workflowVersion: number;
+  nextStep: string | null;
+}
 
 export class VaultRepository {
   readonly #pool: pg.Pool;
@@ -509,6 +515,109 @@ export class VaultRepository {
         ],
       );
       return response;
+    });
+  }
+
+  async getDocumentProcessingInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<DocumentProcessingInput> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        object_key: string;
+        original_sha256: string;
+        media_type: string;
+        status: string;
+        encryption_key_version: number;
+        wrapped_data_key: unknown;
+        maximum_bytes: string;
+        version: number;
+        workflow_id: string;
+        workflow_status: string;
+        workflow_version: number;
+        next_step: string | null;
+      }>(
+        "select d.id,d.object_key,d.original_sha256,d.media_type,d.status,d.encryption_key_version,d.wrapped_data_key,d.maximum_bytes,d.version,w.id as workflow_id,w.status as workflow_status,w.version as workflow_version,w.next_step from documents d join workflow_runs w on w.subject_type='Document' and w.subject_id=d.id where w.id=$1",
+        [workflowId],
+      );
+      const row = result.rows[0];
+      if (!row || !row.wrapped_data_key)
+        throw new Error("document processing input is unavailable");
+      return {
+        id: row.id,
+        objectKey: row.object_key,
+        originalSha256: row.original_sha256,
+        mediaType: row.media_type,
+        status: row.status,
+        encryptionKeyVersion: row.encryption_key_version,
+        wrappedDataKey: row.wrapped_data_key,
+        maximumBytes: Number(row.maximum_bytes),
+        version: row.version,
+        workflowId: row.workflow_id,
+        workflowStatus: row.workflow_status,
+        workflowVersion: row.workflow_version,
+        nextStep: row.next_step,
+      };
+    });
+  }
+
+  async completeDocumentScan(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      documentVersion: number;
+      workflowVersion: number;
+      outcome: "clean" | "rejected";
+      processedAt: string;
+    },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      const document = await client.query(
+        "update documents set status=$1,processed_at=$2,last_error_class=null,version=version+1 where id=$3 and status='quarantined' and version=$4",
+        [
+          input.outcome,
+          input.processedAt,
+          input.documentId,
+          input.documentVersion,
+        ],
+      );
+      if (document.rowCount !== 1)
+        throw new Error("document scan completion conflict");
+      const terminal = input.outcome === "rejected";
+      const workflow = await client.query(
+        "update workflow_runs set status=$1,completed_steps=case when completed_steps ? 'scan' then completed_steps else completed_steps || '[\"scan\"]'::jsonb end,next_step=$2,last_error_class=null,version=version+1 where id=$3 and version=$4 and next_step='scan'",
+        [
+          terminal ? "completed" : "running",
+          terminal ? null : "ocr",
+          input.workflowId,
+          input.workflowVersion,
+        ],
+      );
+      if (workflow.rowCount !== 1)
+        throw new Error("document scan workflow conflict");
+    });
+  }
+
+  async recordDocumentScanFailure(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      errorClass: string;
+    },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      const errorClass = input.errorClass.slice(0, 120);
+      await client.query(
+        "update documents set last_error_class=$1,version=version+1 where id=$2 and status='quarantined'",
+        [errorClass, input.documentId],
+      );
+      await client.query(
+        "update workflow_runs set status='failed',last_error_class=$1,version=version+1 where id=$2 and status<>'completed'",
+        [errorClass, input.workflowId],
+      );
     });
   }
 

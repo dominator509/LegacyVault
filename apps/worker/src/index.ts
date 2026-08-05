@@ -9,9 +9,16 @@ import {
   type PostgresHouseholdKeyStore,
 } from "@legacy/crypto";
 import type {
+  DocumentProcessingInput,
   PortableExportBuildInput,
   TenantContext,
 } from "@legacy/database/repository";
+import {
+  DocumentQuarantineService,
+  ObjectIntegrityError,
+  type MalwareScanner,
+  type QuarantineObjectStore,
+} from "@legacy/documents";
 import {
   createPortableExport,
   type PortableExportEntry,
@@ -57,6 +64,28 @@ export interface PortableExportObjectStore {
     ciphertext: Uint8Array;
     checksumSha256Base64: string;
   }): Promise<void>;
+}
+
+export interface DocumentProcessingRepository {
+  getDocumentProcessingInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<DocumentProcessingInput>;
+  completeDocumentScan(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      documentVersion: number;
+      workflowVersion: number;
+      outcome: "clean" | "rejected";
+      processedAt: string;
+    },
+  ): Promise<void>;
+  recordDocumentScanFailure(
+    context: TenantContext,
+    input: { documentId: string; workflowId: string; errorClass: string },
+  ): Promise<void>;
 }
 
 function storedEnvelope(value: unknown): EncryptedEnvelope {
@@ -172,6 +201,110 @@ export function createPortableExportWorkflowHandler(input: {
     } finally {
       exportKey.fill(0);
       householdKey.plaintextKey.fill(0);
+    }
+  };
+}
+
+export function createDocumentScanWorkflowHandler(input: {
+  repository: DocumentProcessingRepository;
+  householdKeyStore: PostgresHouseholdKeyStore;
+  objectStore: QuarantineObjectStore;
+  malwareScanner: MalwareScanner;
+}): WorkflowHandler {
+  return async (data) => {
+    const context = {
+      organizationId: data.organizationId,
+      householdId: data.householdId,
+      actorId: data.actorId,
+    };
+    let document: DocumentProcessingInput | undefined;
+    try {
+      document = await input.repository.getDocumentProcessingInput(
+        context,
+        data.workflowId,
+      );
+      if (
+        document.status === "clean" ||
+        document.status === "rejected" ||
+        document.nextStep !== "scan"
+      )
+        return;
+      if (document.status !== "quarantined")
+        throw new Error("document is not quarantined");
+      const householdKey =
+        await input.householdKeyStore.getOrCreateActiveKey(context);
+      let dataKey: Uint8Array | undefined;
+      try {
+        dataKey = decryptEnvelope(
+          storedEnvelope(document.wrappedDataKey),
+          householdKey.plaintextKey,
+          {
+            organizationId: context.organizationId,
+            householdId: context.householdId,
+            recordId: document.id,
+            purpose: "document-data-key",
+            keyVersion: document.encryptionKeyVersion,
+          },
+        );
+        const quarantine = new DocumentQuarantineService(
+          input.objectStore,
+          input.malwareScanner,
+          async (ciphertext: Uint8Array) => {
+            let envelope: unknown;
+            try {
+              envelope = JSON.parse(Buffer.from(ciphertext).toString("utf8"));
+            } catch {
+              throw new ObjectIntegrityError(
+                "document ciphertext envelope is invalid",
+              );
+            }
+            const plaintext = decryptEnvelope(
+              storedEnvelope(envelope),
+              dataKey!,
+              {
+                organizationId: context.organizationId,
+                householdId: context.householdId,
+                recordId: document!.id,
+                purpose: "document-original",
+                keyVersion: document!.encryptionKeyVersion,
+              },
+            );
+            const digest = createHash("sha256").update(plaintext).digest("hex");
+            if (digest !== document!.originalSha256) {
+              plaintext.fill(0);
+              throw new ObjectIntegrityError(
+                "document plaintext checksum mismatch",
+              );
+            }
+            return plaintext;
+          },
+        );
+        const result = await quarantine.scan({
+          objectKey: document.objectKey,
+          declaredMediaType: document.mediaType,
+          maximumBytes: document.maximumBytes,
+        });
+        await input.repository.completeDocumentScan(context, {
+          documentId: document.id,
+          workflowId: document.workflowId,
+          documentVersion: document.version,
+          workflowVersion: document.workflowVersion,
+          outcome:
+            result.status === "clean-awaiting-ocr" ? "clean" : "rejected",
+          processedAt: new Date().toISOString(),
+        });
+      } finally {
+        dataKey?.fill(0);
+        householdKey.plaintextKey.fill(0);
+      }
+    } catch (error) {
+      if (document)
+        await input.repository.recordDocumentScanFailure(context, {
+          documentId: document.id,
+          workflowId: document.workflowId,
+          errorClass: error instanceof Error ? error.name : "UnknownError",
+        });
+      throw error;
     }
   };
 }

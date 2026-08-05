@@ -112,6 +112,9 @@ importers:
       '@legacy/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@legacy/documents':
+        specifier: workspace:*
+        version: link:../../packages/documents
       '@legacy/reports':
         specifier: workspace:*
         version: link:../../packages/reports

@@ -7,6 +7,11 @@ import { runMigrations } from "../../packages/database/src/migrate.js";
 import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { AuthorizationDeniedError } from "../../packages/auth/src/index.js";
 import {
+  ClamAvScanner,
+  DocumentObjectStore,
+} from "../../packages/documents/src/index.js";
+import { createDocumentScanWorkflowHandler } from "../../apps/worker/src/index.js";
+import {
   decryptEnvelope,
   encryptEnvelope,
   PostgresHouseholdKeyStore,
@@ -382,6 +387,69 @@ describe("composed application runtime", () => {
       expect(
         JSON.stringify(documentRow.rows[0]?.wrapped_data_key),
       ).not.toContain(documentUpload?.encryption.keyBase64);
+      const scanKeyStore = new PostgresHouseholdKeyStore(
+        environment.DATABASE_URL ?? "",
+        Buffer.from(environment.APP_ENCRYPTION_KEK ?? "", "base64"),
+      );
+      const scanObjectStore = new DocumentObjectStore({
+        endpoint: objectStoreEndpoint,
+        region: "auto",
+        bucket: local.R2_BUCKET ?? "",
+        accessKeyId: local.R2_ACCESS_KEY_ID ?? "",
+        secretAccessKey: local.R2_SECRET_ACCESS_KEY ?? "",
+        forcePathStyle: true,
+        allowBucketCreation: true,
+      });
+      try {
+        const scan = createDocumentScanWorkflowHandler({
+          repository: runtime.dependencies.repository,
+          householdKeyStore: scanKeyStore,
+          objectStore: scanObjectStore,
+          malwareScanner: new ClamAvScanner({
+            host: "127.0.0.1",
+            port: 13310,
+            timeoutMs: 10_000,
+          }),
+        });
+        await scan({
+          workflowId: documentProcessing?.workflow.id ?? "",
+          organizationId,
+          householdId,
+          actorId,
+        });
+        await client.query("begin");
+        await client.query(
+          "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+          [organizationId, householdId],
+        );
+        const scanRow = await client.query<{
+          status: string;
+          next_step: string;
+          workflow_status: string;
+          last_error_class: string | null;
+        }>(
+          "select d.status,w.next_step,w.status as workflow_status,w.last_error_class from documents d join workflow_runs w on w.subject_id=d.id where d.id=$1",
+          [documentUpload?.document.id],
+        );
+        await client.query("commit");
+        expect(scanRow.rows[0]).toEqual({
+          status: "clean",
+          next_step: "ocr",
+          workflow_status: "running",
+          last_error_class: null,
+        });
+        const persistedDocument =
+          await runtime.dependencies.repository.getDocumentProcessingInput(
+            identity,
+            documentProcessing?.workflow.id ?? "",
+          );
+        expect(
+          await scanObjectStore.objectStatus(persistedDocument.objectKey),
+        ).toBe("clean");
+        await scanObjectStore.deleteObject(persistedDocument.objectKey);
+      } finally {
+        await scanKeyStore.close();
+      }
       documentPlaintext.fill(0);
       documentKey.fill(0);
       documentCiphertext.fill(0);

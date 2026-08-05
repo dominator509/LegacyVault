@@ -132,3 +132,8 @@
 2026-08-05T23:21:49Z | codex | EP-004 | SIG | typecheck_TS2345_optional_test_R2_endpoint_and_format_check_two_files_security_ok
 2026-08-05T23:21:49Z | codex | EP-004 | HYPOTHESIS | explicitly_assert_required_test_endpoint_before_URL_parse_then_run_authorized_formatter
 2026-08-05T23:24:20Z | codex | EP-004 | HEARTBEAT | two_phase_envelope_encrypted_presigned_upload_checksum_quarantine_RLS_workflow_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T23:26:21Z | codex | EP-004 | SIG | lint_TS2307_worker_missing_existing_documents_workspace_dependency_and_TS7006_callback_type
+2026-08-05T23:26:21Z | codex | EP-004 | HYPOTHESIS | declare_reviewed_documents_workspace_boundary_and_explicit_ciphertext_type_then_refresh_lock_once
+2026-08-05T23:28:41Z | codex | EP-004 | SIG | format_check_exit_1_document_scan_worker_style_only_type_and_security_ok
+2026-08-05T23:28:41Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T23:30:58Z | codex | EP-004 | HEARTBEAT | worker_only_document_key_unwrap_plaintext_checksum_MIME_and_real_ClamAV_scan_persisted_next_OCR_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok
