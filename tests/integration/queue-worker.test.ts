@@ -22,6 +22,7 @@ describe("real Valkey workflow queue", () => {
       "document-process": handler,
       "report-generate": handler,
       "privacy-delete": handler,
+      "privacy-export": handler,
       "annual-review": handler,
       "notification-send": handler,
     } as const;

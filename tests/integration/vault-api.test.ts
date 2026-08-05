@@ -27,12 +27,20 @@ const authorizationScopes: {
   action: string;
   purpose: string;
 }[] = [];
+let observedExportKey: Uint8Array | undefined;
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
   authorizeIdentity: (resolved, scope) => {
     requireIdentityAuthorization(resolved, scope);
     authorizationScopes.push(scope);
+  },
+  startPortableExport: async (_resolved, input) => {
+    observedExportKey = input.exportKey;
+    return {
+      export: { id: randomUUID(), status: "pending", version: 1 },
+      workflow: { id: randomUUID(), status: "pending", version: 1 },
+    };
   },
 });
 
@@ -277,5 +285,28 @@ describe("vault API persistence", () => {
       title: "Invalid request",
       detail: "fieldKey must begin with a canonical record category",
     });
+  });
+
+  it("authorizes a full-household export and clears decoded key material", async () => {
+    const requested = await server.inject({
+      method: "POST",
+      url: "/v1/exports",
+      headers: { "idempotency-key": `export-${randomUUID()}` },
+      payload: { exportKeyBase64: Buffer.alloc(32, 11).toString("base64") },
+    });
+    expect(requested.statusCode).toBe(202);
+    expect(requested.json()).toMatchObject({
+      export: { status: "pending", version: 1 },
+      workflow: { status: "pending", version: 1 },
+    });
+    expect(observedExportKey).toBeDefined();
+    expect(Buffer.from(observedExportKey ?? []).equals(Buffer.alloc(32))).toBe(
+      true,
+    );
+    const exportScopes = authorizationScopes.filter(
+      (scope) => scope.purpose === "vault.export.create",
+    );
+    expect(exportScopes).toHaveLength(13);
+    expect(exportScopes.every((scope) => scope.action === "export")).toBe(true);
   });
 });

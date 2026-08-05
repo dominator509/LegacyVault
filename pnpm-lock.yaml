@@ -41,12 +41,18 @@ importers:
       '@legacy/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@legacy/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
       '@legacy/database':
         specifier: workspace:*
         version: link:../../packages/database
       '@legacy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@legacy/worker':
+        specifier: workspace:*
+        version: link:../worker
       fastify:
         specifier: 5.11.2
         version: 5.11.2
@@ -218,6 +224,9 @@ importers:
 
   packages/reports:
     dependencies:
+      '@legacy/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@legacy/domain':
         specifier: workspace:*
         version: link:../domain

@@ -39,6 +39,11 @@ export interface NormalizedBillingEvent {
 export type PrivacyRequestKind =
   "access" | "correction" | "export" | "deletion" | "appeal";
 
+export interface StartedPortableExport {
+  export: { id: string; status: string; version: number };
+  workflow: { id: string; status: string; version: number };
+}
+
 export class VaultRepository {
   readonly #pool: pg.Pool;
   constructor(databaseUrl: string) {
@@ -435,6 +440,100 @@ export class VaultRepository {
         privacyRequest,
         ...(workflow ? { workflow } : {}),
       };
+      await client.query(
+        "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
+    });
+  }
+
+  async startPortableExport(
+    context: TenantContext,
+    input: {
+      idempotencyKey: string;
+      exportKeyFingerprint: string;
+      wrappedExportKey: unknown;
+      encryptionKeyVersion: number;
+      requestedAt: string;
+    },
+  ): Promise<StartedPortableExport> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            exportKeyFingerprint: input.exportKeyFingerprint,
+            encryptionKeyVersion: input.encryptionKeyVersion,
+          }),
+        )
+        .digest("hex");
+      const inserted = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (inserted.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("idempotency key reused with different request");
+        if (!row.response_body)
+          throw new Error("export request is still processing");
+        return row.response_body as StartedPortableExport;
+      }
+
+      const exportId = randomUUID();
+      const workflowId = randomUUID();
+      const workflowResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,'export',$4,'pending','[]','snapshot','Export',$5) returning id,status,version",
+        [
+          workflowId,
+          context.organizationId,
+          context.householdId,
+          `export:${exportId}`,
+          exportId,
+        ],
+      );
+      const exportResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "insert into exports(id,organization_id,household_id,workflow_id,status,wrapped_export_key,encryption_key_version,created_at) values ($1,$2,$3,$4,'pending',$5,$6,$7) returning id,status,version",
+        [
+          exportId,
+          context.organizationId,
+          context.householdId,
+          workflowId,
+          JSON.stringify(input.wrappedExportKey),
+          input.encryptionKeyVersion,
+          input.requestedAt,
+        ],
+      );
+      const workflow = workflowResult.rows[0];
+      const exportRecord = exportResult.rows[0];
+      if (!workflow || !exportRecord)
+        throw new Error("portable export request was not persisted");
+      const response = { export: exportRecord, workflow };
       await client.query(
         "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
         [

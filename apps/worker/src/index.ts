@@ -5,6 +5,7 @@ export type WorkflowJobName =
   | "document-process"
   | "report-generate"
   | "privacy-delete"
+  | "privacy-export"
   | "annual-review"
   | "notification-send";
 export interface WorkflowJobData {

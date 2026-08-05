@@ -10,7 +10,7 @@ export class DomainInvariantError extends Error {
   override readonly name = "DomainInvariantError";
 }
 
-const recordCategories: ReadonlySet<RecordCategory> = new Set([
+export const allRecordCategories: readonly RecordCategory[] = [
   "contacts",
   "advisers",
   "dependents",
@@ -24,7 +24,10 @@ const recordCategories: ReadonlySet<RecordCategory> = new Set([
   "digital-asset-locations",
   "household-instructions",
   "funeral-preferences",
-]);
+];
+const recordCategories: ReadonlySet<RecordCategory> = new Set(
+  allRecordCategories,
+);
 
 export function recordCategoryFromFieldKey(fieldKey: string): RecordCategory {
   const prefix = fieldKey.split(".", 1)[0];

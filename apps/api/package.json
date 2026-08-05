@@ -11,8 +11,10 @@
     "@legacy/audit": "workspace:*",
     "@legacy/auth": "workspace:*",
     "@legacy/contracts": "workspace:*",
+    "@legacy/crypto": "workspace:*",
     "@legacy/database": "workspace:*",
     "@legacy/domain": "workspace:*",
+    "@legacy/worker": "workspace:*",
     "fastify": "5.11.2",
     "pino": "10.3.1"
   },

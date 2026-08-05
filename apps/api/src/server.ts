@@ -10,6 +10,8 @@ import { registerBillingRoutes } from "./routes/billing.js";
 import type { StripeAdapter } from "./adapters/stripe.js";
 import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
 import { createApplicationRuntime } from "./runtime.js";
+import type { AuthenticatedTenantIdentity } from "@legacy/auth";
+import type { StartedPortableExport } from "@legacy/database/repository";
 
 export interface ServerDependencies {
   repository: VaultRepository;
@@ -18,13 +20,19 @@ export interface ServerDependencies {
   stripe?: StripeAdapter;
   auth?: AuthHandler;
   authBaseUrl?: string;
+  startPortableExport?: (
+    identity: AuthenticatedTenantIdentity,
+    input: { idempotencyKey: string; exportKey: Uint8Array },
+  ) => Promise<StartedPortableExport>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
   const environment = loadEnvironment(process.env);
   if (
     environment.NODE_ENV === "production" &&
-    (!dependencies?.auth || !dependencies.authorizeIdentity)
+    (!dependencies?.auth ||
+      !dependencies.authorizeIdentity ||
+      !dependencies.startPortableExport)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",

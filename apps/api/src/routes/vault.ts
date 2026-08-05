@@ -3,7 +3,10 @@ import type {
   TenantContext,
   VaultRepository,
 } from "@legacy/database/repository";
-import { recordCategoryFromFieldKey } from "@legacy/domain";
+import {
+  allRecordCategories,
+  recordCategoryFromFieldKey,
+} from "@legacy/domain";
 import {
   AuthenticationRequiredError,
   AuthorizationDeniedError,
@@ -109,6 +112,10 @@ export async function registerVaultRoutes(
     repository: VaultRepository;
     resolveIdentity: IdentityResolver;
     authorizeIdentity?: IdentityAuthorizer;
+    startPortableExport?: (
+      identity: AuthenticatedTenantIdentity,
+      input: { idempotencyKey: string; exportKey: Uint8Array },
+    ) => Promise<unknown>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -410,5 +417,45 @@ export async function registerVaultRoutes(
       requestedAt: new Date().toISOString(),
     });
     return reply.code(202).send(result);
+  });
+
+  server.post("/v1/exports", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.startPortableExport)
+      throw new ApiProblem(
+        503,
+        "Export unavailable",
+        "The export workflow is not configured.",
+      );
+    for (const category of allRecordCategories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "export",
+        purpose: "vault.export.create",
+      });
+    const body = objectBody(request.body);
+    const encodedKey = requiredString(body, "exportKeyBase64");
+    if (!/^[A-Za-z0-9+/]{43}=$/u.test(encodedKey))
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "exportKeyBase64 must encode exactly 32 bytes",
+      );
+    const exportKey = Buffer.from(encodedKey, "base64");
+    if (exportKey.byteLength !== 32)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "exportKeyBase64 must encode exactly 32 bytes",
+      );
+    try {
+      const started = await dependencies.startPortableExport(identity, {
+        idempotencyKey: idempotencyKey(request),
+        exportKey,
+      });
+      return reply.code(202).send(started);
+    } finally {
+      exportKey.fill(0);
+    }
   });
 }

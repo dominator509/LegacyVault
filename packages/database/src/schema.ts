@@ -141,6 +141,20 @@ export const reports = pgTable("reports", {
   sourceFactVersions: jsonb("source_fact_versions").notNull(),
   ...versioned,
 });
+export const exports = pgTable("exports", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  workflowId: uuid("workflow_id").notNull(),
+  status: text("status").notNull(),
+  wrappedExportKey: jsonb("wrapped_export_key").notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull(),
+  objectKey: text("object_key"),
+  archiveSha256: text("archive_sha256"),
+  signerPublicKey: text("signer_public_key"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  ...versioned,
+});
 export const workflowRuns = pgTable(
   "workflow_runs",
   {
@@ -152,6 +166,8 @@ export const workflowRuns = pgTable(
     completedSteps: jsonb("completed_steps").notNull(),
     nextStep: text("next_step"),
     lastErrorClass: text("last_error_class"),
+    subjectType: text("subject_type"),
+    subjectId: uuid("subject_id"),
     ...versioned,
   },
   (table) => [

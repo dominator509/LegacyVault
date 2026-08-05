@@ -8,7 +8,9 @@ import {
   resolveRequestIdentity,
 } from "@legacy/auth";
 import type { Environment } from "@legacy/contracts/environment";
+import { encryptEnvelope } from "@legacy/crypto";
 import { VaultRepository } from "@legacy/database/repository";
+import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
 import {
   LocalSmtpCaptureAdapter,
   ResendEmailAdapter,
@@ -37,6 +39,9 @@ export function createApplicationRuntime(environment: Environment): {
     !environment.DATABASE_URL ||
     !environment.SESSION_SECRET ||
     !environment.AUDIT_HMAC_KEY ||
+    !environment.APP_ENCRYPTION_KEK ||
+    !environment.EXPORT_SIGNING_KEY ||
+    !environment.REDIS_URL ||
     !environment.API_BASE_URL ||
     !environment.APP_BASE_URL ||
     !environment.EMAIL_FROM
@@ -47,6 +52,10 @@ export function createApplicationRuntime(environment: Environment): {
   const auditKey = Buffer.from(environment.AUDIT_HMAC_KEY, "base64");
   if (auditKey.byteLength < 32) throw new Error("audit HMAC key is invalid");
   const auditStore = new PostgresAuditStore(environment.DATABASE_URL, auditKey);
+  const applicationKek = Buffer.from(environment.APP_ENCRYPTION_KEK, "base64");
+  if (applicationKek.byteLength !== 32)
+    throw new Error("application encryption KEK is invalid");
+  const workflowQueue = createWorkflowQueue(environment.REDIS_URL);
   const email = environment.LOCAL_ENGINEERING_MODE
     ? new LocalSmtpCaptureAdapter({
         host: "127.0.0.1",
@@ -145,6 +154,31 @@ export function createApplicationRuntime(environment: Environment): {
           throw error;
         }
       },
+      startPortableExport: async (identity, input) => {
+        const fingerprint = createHash("sha256")
+          .update(input.exportKey)
+          .digest("hex");
+        const started = await repository.startPortableExport(identity, {
+          idempotencyKey: input.idempotencyKey,
+          exportKeyFingerprint: fingerprint,
+          wrappedExportKey: encryptEnvelope(input.exportKey, applicationKek, {
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            recordId: identity.householdId,
+            purpose: "portable-export-key",
+            keyVersion: 1,
+          }),
+          encryptionKeyVersion: 1,
+          requestedAt: new Date().toISOString(),
+        });
+        await enqueueWorkflow(workflowQueue, "privacy-export", {
+          workflowId: started.workflow.id,
+          organizationId: identity.organizationId,
+          householdId: identity.householdId,
+          actorId: identity.actorId,
+        });
+        return started;
+      },
     },
     async close() {
       await Promise.all([
@@ -152,6 +186,7 @@ export function createApplicationRuntime(environment: Environment): {
         identityStore.close(),
         authRuntime.close(),
         auditStore.close(),
+        workflowQueue.close(),
       ]);
     },
   };

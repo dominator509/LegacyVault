@@ -100,3 +100,10 @@
 2026-08-05T22:23:50Z | codex | EP-006 | SIG | format_check_exit_1_access_store_and_bounded_access_test_style_only_lint_integration_32_ok
 2026-08-05T22:23:50Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
 2026-08-05T22:25:22Z | codex | EP-006 | HEARTBEAT | RLS_JIT_support_approval_revocation_emergency_release_route_authorization_consent_withdrawal_audited_allow_deny_unit_33_integration_32_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T22:26:30Z | codex | EP-006 | LEASE_RELEASE | NODE_DONE_withheld_client_passkey_TOTP_Turnstile_live_proof_and_external_preflight
+2026-08-05T22:26:30Z | codex | EP-004 | LEASE | resume_after_local_crypto_auth_dependencies_unblocked
+2026-08-05T22:29:39Z | codex | EP-004 | SIG | format_check_exit_1_portable_export_style_only_install_audit_lint_unit_35_ok
+2026-08-05T22:29:39Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_unit_gates
+2026-08-05T22:36:00Z | codex | EP-004 | SIG | lint_TS2307_worker_package_missing_export_and_TS2741_handler_map_missing_privacy_export_integration_import_failure
+2026-08-05T22:36:00Z | codex | EP-004 | HYPOTHESIS | expose_existing_worker_source_boundary_and_extend_exhaustive_real_queue_handler_map
+2026-08-05T22:38:25Z | codex | EP-004 | HEARTBEAT | signed_encrypted_portable_export_wrapped_key_idempotent_RLS_workflow_Redis_queue_unit_35_integration_33_e2e_2_build_format_security_audit_smoke_ok

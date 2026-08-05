@@ -21,6 +21,9 @@ const environment = loadEnvironment({
   DATABASE_URL: local.TEST_DATABASE_URL,
   SESSION_SECRET: local.SESSION_SECRET,
   AUDIT_HMAC_KEY: local.AUDIT_HMAC_KEY,
+  APP_ENCRYPTION_KEK: local.APP_ENCRYPTION_KEK,
+  EXPORT_SIGNING_KEY: local.EXPORT_SIGNING_KEY,
+  REDIS_URL: local.REDIS_URL,
   API_BASE_URL: "http://127.0.0.1:3001",
   APP_BASE_URL: "http://127.0.0.1:3000",
   EMAIL_FROM: "Legacy Vault <notices@localhost.invalid>",
@@ -154,6 +157,41 @@ describe("composed application runtime", () => {
           },
         },
       ]);
+
+      const exportKey = Buffer.alloc(32, 19);
+      const idempotencyKey = `runtime-export-${randomUUID()}`;
+      const started = await runtime.dependencies.startPortableExport?.(
+        identity,
+        { idempotencyKey, exportKey },
+      );
+      const replay = await runtime.dependencies.startPortableExport?.(
+        identity,
+        { idempotencyKey, exportKey: Buffer.from(exportKey) },
+      );
+      expect(replay).toEqual(started);
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [organizationId, householdId],
+      );
+      const persisted = await client.query<{
+        status: string;
+        wrapped_export_key: unknown;
+        subject_type: string;
+        subject_id: string;
+      }>(
+        "select e.status,e.wrapped_export_key,w.subject_type,w.subject_id from exports e join workflow_runs w on w.id=e.workflow_id where e.id=$1",
+        [started?.export.id],
+      );
+      await client.query("commit");
+      expect(persisted.rows[0]).toMatchObject({
+        status: "pending",
+        subject_type: "Export",
+        subject_id: started?.export.id,
+      });
+      expect(
+        JSON.stringify(persisted.rows[0]?.wrapped_export_key),
+      ).not.toContain(exportKey.toString("base64"));
     } finally {
       await client.end();
     }
