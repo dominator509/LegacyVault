@@ -8,7 +8,7 @@ export interface StripeConfig {
   timeoutMs: number;
 }
 export interface CheckoutRequest {
-  customerId: string;
+  clientReferenceId: string;
   successUrl: string;
   cancelUrl: string;
   idempotencyKey: string;
@@ -48,12 +48,15 @@ export class StripeAdapter {
     if (!this.config.secretKey || !this.config.essentialPriceId)
       throw new Error("Stripe is not configured");
     const body = new URLSearchParams({
-      customer: request.customerId,
+      client_reference_id: request.clientReferenceId,
       mode: "subscription",
       success_url: request.successUrl,
       cancel_url: request.cancelUrl,
       "line_items[0][price]": this.config.essentialPriceId,
       "line_items[0][quantity]": "1",
+      "metadata[legacy_organization_id]": request.organizationId,
+      "metadata[legacy_household_id]": request.householdId,
+      "metadata[legacy_plan]": request.plan,
       "subscription_data[metadata][legacy_organization_id]":
         request.organizationId,
       "subscription_data[metadata][legacy_household_id]": request.householdId,
@@ -82,6 +85,13 @@ export class StripeAdapter {
       const result = (await response.json()) as { id?: string; url?: string };
       if (!result.id || !result.url)
         throw new Error("Stripe checkout response invalid");
+      const checkoutUrl = new URL(result.url);
+      if (
+        checkoutUrl.protocol !== "https:" ||
+        (!checkoutUrl.hostname.endsWith(".stripe.com") &&
+          !checkoutUrl.hostname.endsWith(".stripe.test"))
+      )
+        throw new Error("Stripe checkout URL invalid");
       return { id: result.id, url: result.url };
     } finally {
       clearTimeout(timer);

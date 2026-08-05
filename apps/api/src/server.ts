@@ -32,6 +32,10 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     kind: "family-emergency-guide" | "executor-preparation-packet",
   ) => Promise<{ id: string; kind: string; version: number }>;
+  createCheckout?: (
+    identity: AuthenticatedTenantIdentity,
+    idempotencyKey: string,
+  ) => Promise<{ id: string; url: string }>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -42,7 +46,8 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.authorizeIdentity ||
       !dependencies.startPortableExport ||
       !dependencies.encryptFactValue ||
-      !dependencies.createReport)
+      !dependencies.createReport ||
+      !dependencies.createCheckout)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",

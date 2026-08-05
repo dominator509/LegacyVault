@@ -54,6 +54,10 @@ const server = buildServer({
     kind,
     version: 1,
   }),
+  createCheckout: async () => ({
+    id: "cs_local_contract",
+    url: "https://checkout.stripe.test/session",
+  }),
 });
 
 beforeAll(async () => {
@@ -345,5 +349,23 @@ describe("vault API persistence", () => {
         (scope) => scope.purpose === "vault.report.create",
       ),
     ).toHaveLength(26);
+  });
+
+  it("authorizes billing checkout from authenticated tenant context", async () => {
+    const checkout = await server.inject({
+      method: "POST",
+      url: "/v1/billing/checkout",
+      headers: { "idempotency-key": `checkout-${randomUUID()}` },
+    });
+    expect(checkout.statusCode).toBe(201);
+    expect(checkout.json()).toEqual({
+      id: "cs_local_contract",
+      url: "https://checkout.stripe.test/session",
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.billing.checkout",
+    });
   });
 });

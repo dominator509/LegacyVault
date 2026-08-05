@@ -116,3 +116,8 @@
 2026-08-05T22:55:51Z | codex | EP-004 | SIG | format_check_exit_1_report_runtime_style_only_install_audit_lint_integration_36_ok
 2026-08-05T22:55:51Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_security_gates
 2026-08-05T22:58:41Z | codex | EP-004 | HEARTBEAT | household_DEK_RLS_server_fact_encryption_secret_block_export_worker_MinIO_rewrap_and_confirmed_report_unit_36_integration_36_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T23:02:20Z | codex | EP-004 | SIG | format_check_exit_1_checkout_route_style_only_lint_integration_37_security_ok
+2026-08-05T23:02:20Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T23:06:35Z | codex | EP-004 | SIG | full_local_gate_runner_timeout_exit_124_after_5_seconds_before_sentinel
+2026-08-05T23:06:35Z | codex | EP-004 | HYPOTHESIS | runner_wrapper_timeout_is_shorter_than_repository_gate_duration_so_execute_declared_gates_as_bounded_individual_commands
+2026-08-05T23:09:44Z | codex | EP-004 | HEARTBEAT | authenticated_fixed_price_Stripe_Checkout_contract_and_fail_closed_route_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok

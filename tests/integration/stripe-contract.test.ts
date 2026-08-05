@@ -52,7 +52,7 @@ describe("Stripe checkout HTTP contract", () => {
     });
     await expect(
       adapter.createCheckout({
-        customerId: "cus_contract",
+        clientReferenceId: "membership-contract",
         successUrl: "https://app.example.test/billing/success",
         cancelUrl: "https://app.example.test/billing/cancel",
         idempotencyKey: "checkout-contract-key",
@@ -67,7 +67,7 @@ describe("Stripe checkout HTTP contract", () => {
     expect(authorization).toBe("Bearer sk_test_contract");
     expect(idempotency).toBe("checkout-contract-key");
     expect(Object.fromEntries(received)).toMatchObject({
-      customer: "cus_contract",
+      client_reference_id: "membership-contract",
       mode: "subscription",
       "line_items[0][price]": "price_contract",
       "subscription_data[metadata][legacy_organization_id]":
@@ -75,6 +75,8 @@ describe("Stripe checkout HTTP contract", () => {
       "subscription_data[metadata][legacy_household_id]":
         "22222222-2222-4222-8222-222222222222",
       "subscription_data[metadata][legacy_plan]": "essential",
+      "metadata[legacy_organization_id]":
+        "11111111-1111-4111-8111-111111111111",
     });
   });
 });

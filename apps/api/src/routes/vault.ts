@@ -125,6 +125,10 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       kind: "family-emergency-guide" | "executor-preparation-packet",
     ) => Promise<unknown>;
+    createCheckout?: (
+      identity: AuthenticatedTenantIdentity,
+      idempotencyKey: string,
+    ) => Promise<{ id: string; url: string }>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -532,5 +536,33 @@ export async function registerVaultRoutes(
       report,
     );
     return reply.code(201).send(report);
+  });
+
+  server.post("/v1/billing/checkout", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.createCheckout)
+      throw new ApiProblem(
+        503,
+        "Billing unavailable",
+        "Billing checkout is not configured.",
+      );
+    await dependencies.authorizeIdentity?.(identity, {
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.billing.checkout",
+    });
+    try {
+      return reply
+        .code(201)
+        .send(
+          await dependencies.createCheckout(identity, idempotencyKey(request)),
+        );
+    } catch {
+      throw new ApiProblem(
+        503,
+        "Billing unavailable",
+        "Billing checkout could not be created.",
+      );
+    }
   });
 }

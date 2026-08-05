@@ -263,6 +263,22 @@ export function createApplicationRuntime(environment: Environment): {
           householdKey.plaintextKey.fill(0);
         }
       },
+      createCheckout: (identity, idempotencyKey) =>
+        stripe.createCheckout({
+          clientReferenceId: identity.membershipId,
+          successUrl: new URL(
+            "/billing/success",
+            environment.APP_BASE_URL,
+          ).toString(),
+          cancelUrl: new URL(
+            "/billing/cancel",
+            environment.APP_BASE_URL,
+          ).toString(),
+          idempotencyKey,
+          organizationId: identity.organizationId,
+          householdId: identity.householdId,
+          plan: "essential",
+        }),
     },
     async close() {
       await Promise.all([
