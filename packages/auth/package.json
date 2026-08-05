@@ -1,0 +1,25 @@
+{
+  "name": "@legacy/auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "schema:compile": "tsx --env-file-if-exists=../../.env ../../scripts/compile-auth-migrations.ts"
+  },
+  "dependencies": {
+    "@better-auth/passkey": "1.6.26",
+    "@legacy/domain": "workspace:*",
+    "@node-rs/argon2": "2.0.2",
+    "better-auth": "1.6.26",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "tsx": "4.23.8",
+    "typescript": "7.0.2"
+  }
+}

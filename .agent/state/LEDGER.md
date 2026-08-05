@@ -70,3 +70,13 @@
 2026-08-05T20:45:50Z | codex | EP-004 | HEARTBEAT | Stripe_checkout_signed_webhook_replay_ordering_unit_24_integration_18_build_security_audit_reality_ok
 2026-08-05T20:54:01Z | codex | EP-004 | HEARTBEAT | privacy_request_atomic_replay_validation_unit_24_integration_20_build_security_audit_reality_ok
 2026-08-05T20:54:01Z | codex | EP-004 | LEASE_RELEASE | M1_M2_NODE_DONE_withheld_export_auth_cross_node_dependencies_and_external_preflight
+2026-08-05T20:54:42Z | codex | EP-006 | LEASE | explicit-implementation-continuation-ADR-009_cross-node-dependency
+2026-08-05T21:02:27Z | codex | EP-006 | SIG | crypto_audit_unit_two_failures_composite_exit_masked_by_later_audit
+2026-08-05T21:02:28Z | codex | EP-006 | HYPOTHESIS | normalize_random_DEK_to_Uint8Array_and_hash_only_declared_audit_fields_not_spread_extras
+2026-08-05T21:12:16Z | codex | EP-006 | SIG | dependency_declaration_scan_exit_124_broad_node_modules_traversal
+2026-08-05T21:12:16Z | codex | EP-006 | HYPOTHESIS | inspect_direct_workspace_symlinks_and_targeted_declaration_files_instead_of_full_pnpm_store
+2026-08-05T21:22:30Z | codex | EP-006 | SIG | auth_schema_compile_exit_1_top_level_await_CJS_output
+2026-08-05T21:22:30Z | codex | EP-006 | HYPOTHESIS | wrap_compiler_in_async_main_for_root_script_outside_ESM_package_boundary
+2026-08-05T21:23:41Z | codex | EP-006 | SIG | auth_schema_compile_exit_1_TypeError_after_async_main
+2026-08-05T21:23:41Z | codex | EP-006 | HYPOTHESIS | migration_API_requires_framework_options_without_instantiated_pool_or_exposes_safe_stack_needed_for_narrow_diagnostic
+2026-08-05T21:36:04Z | codex | EP-006 | HEARTBEAT | BetterAuth_passkey_TOTP_Argon2id_AES_GCM_Ed25519_append_only_audit_unit_32_integration_23_build_security_audit_reality_ok

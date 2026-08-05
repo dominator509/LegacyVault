@@ -40,6 +40,7 @@ export const memberships = pgTable("memberships", {
   ...tenant,
   personId: uuid("person_id").notNull(),
   role: text("role").notNull(),
+  authUserId: text("auth_user_id"),
   active: integer("active").notNull().default(1),
   ...versioned,
 });

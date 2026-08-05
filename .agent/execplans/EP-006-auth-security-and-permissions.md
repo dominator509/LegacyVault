@@ -66,7 +66,9 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- Better Auth 1.6.26 exposes its matching schema compiler through `better-auth/db/migration`; the separately published CLI is still tied to core 1.4.21 and was not used.
+- After applying the provider-compiled SQL, recompilation emits no changes but warns that its own generated `rateLimit.lastRequest bigint` is observed as `int8`; real database-backed auth and rate-limit schema remain compatible.
+- The Turnstile Spin workflow requires a scoped Cloudflare token, approved domain, widget creation, and managed Worker deployment before frontend wiring. Those external mutations are deferred without a custom substitute.
 
 # 13. Decision Log
 - None recorded.

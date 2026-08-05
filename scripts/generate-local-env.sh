@@ -9,6 +9,7 @@ fi
 umask 077
 
 random_b64() { openssl rand -base64 48 | tr -d '\r\n'; }
+random_b64_32() { openssl rand -base64 32 | tr -d '\r\n'; }
 random_hex() { openssl rand -hex 24; }
 
 postgres_password=$(random_hex)
@@ -16,10 +17,10 @@ test_password=$(random_hex)
 redis_password=$(random_hex)
 s3_access=$(openssl rand -hex 12)
 s3_secret=$(random_b64)
-encryption_kek=$(random_b64)
+encryption_kek=$(random_b64_32)
 session_secret=$(random_b64)
 audit_key=$(random_b64)
-export_key=$(openssl genpkey -algorithm ED25519 2>/dev/null | openssl base64 -A)
+export_key=$(openssl genpkey -algorithm ED25519 -outform DER 2>/dev/null | openssl base64 -A)
 
 {
   printf '%s\n' '# Generated development-only configuration. Never use these values in production.'
