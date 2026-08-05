@@ -1,0 +1,9 @@
+{
+  "name": "@legacy/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "tsc -p tsconfig.json", "start": "tsx src/index.ts" },
+  "dependencies": { "@legacy/contracts": "workspace:*" },
+  "devDependencies": { "tsx": "4.23.8", "typescript": "7.0.2" }
+}

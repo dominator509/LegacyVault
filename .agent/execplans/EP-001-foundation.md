@@ -64,14 +64,16 @@ The verify sentinel is observed in this session, changed paths match this plan, 
 Re-enter from the first unchecked milestone after verifying the previous checkpoint. Use green tags and the rollback ladder. Never cross a completed node tag.
 
 # 11. Progress
-- [ ] M1 Implement bounded scope
+- [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- The original install gate required a frozen lockfile before EP-001 had created one; ADR-011 permits first-generation only and freezes every subsequent install.
+- The installed Docker client initially had no running engine; Docker Desktop started successfully and reported Engine 29.5.3.
 
 # 13. Decision Log
-- None recorded.
+- ADR-010 added the missing authorized bootstrap, local-infrastructure, and migration commands.
+- ADR-011 defined deterministic first-lockfile generation.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.

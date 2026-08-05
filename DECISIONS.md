@@ -11,5 +11,7 @@
 | ADR-007 | Concierge-assisted launch | Produces revenue and workflow evidence earlier | Accepted |
 | ADR-008 | US-only launch until counsel expands scope | Limits legal surface | Accepted |
 | ADR-009 | Continue independent engineering while EP-000 remains externally unverified | Explicit operator instruction requires maximum local completion; the original node, preflight sentinel, graph dependency, legal gates, and production ship gate remain unchanged and no external result may be fabricated | Accepted for this run |
+| ADR-010 | Add explicit bootstrap diagnostics, package metadata inspection, local environment, Compose, and migration commands | `ENVIRONMENT.md`, the operator's unattended-run requirements, and the EP-001 toolchain scope require reproducible commands that were absent from `COMMANDS.md` | Accepted |
+| ADR-011 | Generate the pnpm lockfile only on the first EP-001 install and freeze every later install | The original install gate failed with `ERR_PNPM_NO_LOCKFILE` while EP-001 is explicitly responsible for creating `pnpm-lock.yaml` | Accepted |
 
 Add a decision before introducing a new canonical name, dependency, provider promise, data category, or exception. Use `.agent/templates/adr-template.md`.

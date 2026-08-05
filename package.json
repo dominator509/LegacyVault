@@ -1,0 +1,32 @@
+{
+  "name": "legacy-vault",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.13.1",
+  "engines": {
+    "node": ">=24.4.1 <25",
+    "pnpm": "10.13.1"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present build",
+    "lint": "tsc --noEmit --pretty false",
+    "format:check": "prettier --check . --ignore-path .gitignore",
+    "typecheck": "tsc --noEmit --pretty false",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration --passWithNoTests=false",
+    "test:e2e": "vitest run tests/e2e --passWithNoTests=false",
+    "security:check": "node scripts/security-check.mjs",
+    "smoke": "vitest run tests/smoke --passWithNoTests=false",
+    "live-fire": "vitest run tests/live-fire --passWithNoTests=false",
+    "db:migrate": "pnpm --filter @legacy/database migrate"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "prettier": "3.9.6",
+    "tsx": "4.23.8",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}
