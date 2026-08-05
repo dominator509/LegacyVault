@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@legacy/contracts": "workspace:*",
+    "@legacy/database": "workspace:*",
     "fastify": "5.11.2",
     "pino": "10.3.1"
   },

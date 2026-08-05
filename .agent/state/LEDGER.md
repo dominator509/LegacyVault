@@ -52,3 +52,6 @@
 2026-08-05T19:32:50Z | codex | EP-004 | SIG | lint_ioredis6_named_Redis_and_BullMQ6_QueueEvents_required
 2026-08-05T19:32:50Z | codex | EP-004 | HYPOTHESIS | use_installed_named_Redis_export_and_explicit_QueueEvents
 2026-08-05T19:43:01Z | codex | EP-004 | HEARTBEAT | ai_gateway_storage_billing_email_reports_queue_slice_unit_19_integration_9_build_security_audit_reality_ok
+2026-08-05T19:49:48Z | codex | EP-004 | SIG | lint_TS18046_Fastify_error_unknown
+2026-08-05T19:49:49Z | codex | EP-004 | HYPOTHESIS | narrow_unknown_error_before_safe_mapping
+2026-08-05T19:56:46Z | codex | EP-004 | HEARTBEAT | postgres_API_idempotency_confirmation_privacy_workflow_SMTP_capture_unit_19_integration_11_build_security_audit_reality_ok

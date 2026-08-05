@@ -1,9 +1,19 @@
-import Fastify from "fastify";
+import Fastify, { LogController } from "fastify";
 import { loadEnvironment } from "@legacy/contracts/environment";
+import type { VaultRepository } from "@legacy/database/repository";
+import { registerVaultRoutes, type IdentityResolver } from "./routes/vault.js";
 
-export function buildServer() {
+export interface ServerDependencies {
+  repository: VaultRepository;
+  resolveIdentity: IdentityResolver;
+}
+
+export function buildServer(dependencies?: ServerDependencies) {
   const environment = loadEnvironment(process.env);
+  if (environment.NODE_ENV === "production" && !dependencies)
+    throw new Error("production service dependencies are required");
   const server = Fastify({
+    logController: new LogController({ disableRequestLogging: true }),
     logger: {
       level: environment.LOG_LEVEL,
       redact: [
@@ -27,7 +37,12 @@ export function buildServer() {
   server.get("/health/dependencies", async () => ({
     status: environment.LOCAL_ENGINEERING_MODE ? "degraded" : "configured",
     externalVerificationDeferred: environment.LOCAL_ENGINEERING_MODE,
+    serviceRoutesConfigured: Boolean(dependencies),
   }));
+  if (dependencies)
+    server.register(async (instance) =>
+      registerVaultRoutes(instance, dependencies),
+    );
   return server;
 }
 

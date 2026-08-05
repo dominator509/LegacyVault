@@ -1,0 +1,212 @@
+import { createHash, randomUUID } from "node:crypto";
+import type pg from "pg";
+import { createDatabasePool } from "./client.js";
+
+export interface TenantContext {
+  organizationId: string;
+  householdId: string;
+  actorId: string;
+}
+export interface CandidateFactWrite {
+  fieldKey: string;
+  ciphertext: Uint8Array;
+  keyVersion: number;
+  sourceType: string;
+  sourceId: string;
+  evidenceIds: readonly string[];
+  confidence?: number;
+  sensitivity: string;
+}
+
+export class VaultRepository {
+  readonly #pool: pg.Pool;
+  constructor(databaseUrl: string) {
+    this.#pool = createDatabasePool(databaseUrl);
+  }
+  async close(): Promise<void> {
+    await this.#pool.end();
+  }
+
+  async withTenant<T>(
+    context: TenantContext,
+    operation: (client: pg.PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id', $1, true), set_config('app.household_id', $2, true)",
+        [context.organizationId, context.householdId],
+      );
+      const result = await operation(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createCandidateFact(
+    context: TenantContext,
+    input: CandidateFactWrite,
+  ): Promise<{ id: string; status: "candidate"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const id = randomUUID();
+      const result = await client.query<{
+        id: string;
+        status: "candidate";
+        version: number;
+      }>(
+        "insert into facts(id, organization_id, household_id, field_key, typed_value_encrypted, key_version, status, source_type, source_id, evidence_ids, confidence, sensitivity) values ($1,$2,$3,$4,$5,$6,'candidate',$7,$8,$9,$10,$11) returning id,status,version",
+        [
+          id,
+          context.organizationId,
+          context.householdId,
+          input.fieldKey,
+          Buffer.from(input.ciphertext),
+          input.keyVersion,
+          input.sourceType,
+          input.sourceId,
+          JSON.stringify(input.evidenceIds),
+          input.confidence ?? null,
+          input.sensitivity,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("candidate fact insert returned no row");
+      return row;
+    });
+  }
+
+  async confirmFact(
+    context: TenantContext,
+    factId: string,
+    expectedVersion: number,
+    confirmedAt: string,
+  ): Promise<{ id: string; status: "confirmed"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: "confirmed";
+        version: number;
+      }>(
+        "update facts set status='confirmed', confirmed_by=$1, confirmed_at=$2, version=version+1 where id=$3 and version=$4 and status in ('candidate','disputed') and (source_type='manual' or jsonb_array_length(evidence_ids)>0) returning id,status,version",
+        [context.actorId, confirmedAt, factId, expectedVersion],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("fact confirmation conflict or policy denial");
+      return row;
+    });
+  }
+
+  async recordConsent(
+    context: TenantContext,
+    input: {
+      personId: string;
+      purpose: string;
+      policyVersion: string;
+      grantedAt: string;
+    },
+  ): Promise<{ id: string; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{ id: string; version: number }>(
+        "insert into consents(id,organization_id,household_id,person_id,purpose,policy_version,granted_at) values ($1,$2,$3,$4,$5,$6,$7) returning id,version",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          input.personId,
+          input.purpose,
+          input.policyVersion,
+          input.grantedAt,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("consent insert returned no row");
+      return row;
+    });
+  }
+
+  async beginWorkflow(
+    context: TenantContext,
+    input: { kind: string; idempotencyKey: string; firstStep: string },
+  ): Promise<{ id: string; status: string; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step) values ($1,$2,$3,$4,$5,'pending','[]',$6) on conflict (organization_id,household_id,idempotency_key) do update set idempotency_key=excluded.idempotency_key returning id,status,version",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          input.kind,
+          input.idempotencyKey,
+          input.firstStep,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("workflow insert returned no row");
+      return row;
+    });
+  }
+
+  async reserveIdempotency(
+    context: TenantContext,
+    key: string,
+    request: unknown,
+  ): Promise<{ replay: boolean; statusCode?: number; responseBody?: unknown }> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(JSON.stringify(request))
+        .digest("hex");
+      const inserted = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [context.organizationId, context.householdId, key, requestHash],
+      );
+      if (inserted.rowCount === 1) return { replay: false };
+      const existing = await client.query<{
+        request_hash: string;
+        status_code: number | null;
+        response_body: unknown;
+      }>(
+        "select request_hash,status_code,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+        [context.organizationId, context.householdId, key],
+      );
+      const row = existing.rows[0];
+      if (!row || row.request_hash !== requestHash)
+        throw new Error("idempotency key reused with different request");
+      return {
+        replay: true,
+        ...(row.status_code === null
+          ? {}
+          : { statusCode: row.status_code, responseBody: row.response_body }),
+      };
+    });
+  }
+
+  async completeIdempotency(
+    context: TenantContext,
+    key: string,
+    statusCode: number,
+    responseBody: unknown,
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      await client.query(
+        "update idempotency_records set status_code=$1,response_body=$2 where organization_id=$3 and household_id=$4 and idempotency_key=$5 and status_code is null",
+        [
+          statusCode,
+          JSON.stringify(responseBody),
+          context.organizationId,
+          context.householdId,
+          key,
+        ],
+      );
+    });
+  }
+}

@@ -35,6 +35,9 @@ importers:
       '@legacy/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@legacy/database':
+        specifier: workspace:*
+        version: link:../../packages/database
       fastify:
         specifier: 5.11.2
         version: 5.11.2
