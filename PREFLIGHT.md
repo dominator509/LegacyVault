@@ -2,6 +2,8 @@
 
 This is the only interactive checkpoint. No graph node may begin until `sh scripts/preflight.sh` prints `preflight: ok`.
 
+For the explicitly authorized 2026-08-05 unattended implementation continuation, missing external items remain release blockers recorded in `.agent/state/DEFERRED_EXTERNALS.md`. This does not change the preflight sentinel, mark EP-000 complete, or permit production deployment.
+
 ## Legal and governance approvals
 
 The operator must place signed or approved evidence under `compliance/evidence/` for: counsel review of Terms and Privacy Policy; DeepSeek vendor risk assessment and current contract or terms snapshot; data protection impact assessment; subprocessor register; cyber and technology E&O insurance; incident contacts; retention schedule; production data-region verification; and a written determination that Legacy Vault is not operating as a data broker.

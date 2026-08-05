@@ -10,3 +10,5 @@
 | Users are at least 18 | Minors are a non-goal | COPPA and capacity risk | Age gate tests | No |
 | Auto-deploy is not authorized | Input says no | Production side effects | DEPLOYMENT.md | No |
 | Concierge staff may handle customer records only with approved JIT access | Business model needs assistance | Insider-risk exposure | Security tests and support-access audit | Yes |
+| Local protocol-compatible PostgreSQL, Redis, S3, SMTP, malware scanning, and telemetry services may be provisioned for engineering | Explicit operator instruction permits real local infrastructure | A provider-specific behavior may still differ | Local integration tests plus later authenticated provider probes | No |
+| Missing external credentials and approvals do not authorize placeholder values or fake passing probes | Explicit operator instruction requires fail-closed continuation | False readiness or data disclosure | `.agent/state/DEFERRED_EXTERNALS.md` and production readiness gate | No |

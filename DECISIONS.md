@@ -10,5 +10,6 @@
 | ADR-006 | Manual production deployment | User did not authorize automatic deploy | Accepted |
 | ADR-007 | Concierge-assisted launch | Produces revenue and workflow evidence earlier | Accepted |
 | ADR-008 | US-only launch until counsel expands scope | Limits legal surface | Accepted |
+| ADR-009 | Continue independent engineering while EP-000 remains externally unverified | Explicit operator instruction requires maximum local completion; the original node, preflight sentinel, graph dependency, legal gates, and production ship gate remain unchanged and no external result may be fabricated | Accepted for this run |
 
 Add a decision before introducing a new canonical name, dependency, provider promise, data category, or exception. Use `.agent/templates/adr-template.md`.
