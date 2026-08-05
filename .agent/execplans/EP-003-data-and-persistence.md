@@ -63,6 +63,7 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 # 11. Progress
 - [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
+- [x] Continuation proof: real migrations and 3 PostgreSQL RLS/integrity tests pass within the 5-test integration suite; format, build, security, audit, and reality gates pass.
 
 # 12. Surprises & Discoveries
 - Strict pnpm isolation prevents root tests from importing package-private `pg`; the database package now exposes its client factory as the approved infrastructure boundary.
@@ -71,4 +72,4 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 - ADR-017 governs the exact Drizzle/PostgreSQL lockfile refresh.
 
 # 14. Outcomes & Retrospective
-- Complete only after NODE_DONE.
+- Persistence engineering is locally proven. The M2 `verify: ok` sentinel, NODE_DONE, and green tag remain withheld because external preflight requirements are unchanged.

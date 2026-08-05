@@ -43,3 +43,6 @@
 2026-08-05T19:11:07Z | codex | EP-003 | SIG | lint_TS2307_test_cannot_resolve_package_local_pg
 2026-08-05T19:11:07Z | codex | EP-003 | HYPOTHESIS | expose_database_client_factory_from_database_package
 2026-08-05T19:13:00Z | codex | EP-003 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok_migrations_ok
+2026-08-05T19:17:10Z | codex | EP-003 | CONTINUATION_PASS | migrations_RLS_integrity_3_integration_suite_5_format_build_security_audit_reality_ok
+2026-08-05T19:17:10Z | codex | EP-003 | EXTERNAL_DEFERRED | verify_stops_at_missing_DEEPSEEK_API_KEY
+2026-08-05T19:17:10Z | codex | EP-003 | LEASE_RELEASE | M2_and_NODE_DONE_withheld_external_preflight
