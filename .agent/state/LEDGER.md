@@ -89,3 +89,14 @@
 2026-08-05T21:59:57Z | codex | EP-006 | SIG | format_check_exit_1_identity_and_membership_test_style_only_lint_and_integration_ok
 2026-08-05T21:59:57Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_gate
 2026-08-05T22:03:59Z | codex | EP-006 | HEARTBEAT | composed_BetterAuth_PostgreSQL_SMTP_membership_grants_MFA_context_compliance_traceability_unit_33_integration_27_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T22:09:37Z | codex | EP-006 | SIG | lint_TS2769_tuple_label_inferred_optional_and_format_one_test_file_in_composite_run
+2026-08-05T22:09:37Z | codex | EP-006 | HYPOTHESIS | preserve_seed_pairs_as_const_tuple_then_run_authorized_formatter
+2026-08-05T22:12:50Z | codex | EP-006 | SIG | lint_TS2307_api_missing_domain_workspace_dependency_and_test_resolvers_missing_authenticated_context
+2026-08-05T22:12:50Z | codex | EP-006 | HYPOTHESIS | declare_reviewed_domain_dependency_and_make_test_identity_contract_explicit
+2026-08-05T22:16:29Z | codex | EP-006 | SIG | format_check_exit_1_vault_route_style_only_lint_integration_30_security_ok
+2026-08-05T22:16:29Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T22:21:36Z | codex | EP-006 | SIG | format_check_exit_1_runtime_and_audit_proof_style_only_lint_integration_32_ok
+2026-08-05T22:21:36Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_security
+2026-08-05T22:23:50Z | codex | EP-006 | SIG | format_check_exit_1_access_store_and_bounded_access_test_style_only_lint_integration_32_ok
+2026-08-05T22:23:50Z | codex | EP-006 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T22:25:22Z | codex | EP-006 | HEARTBEAT | RLS_JIT_support_approval_revocation_emergency_release_route_authorization_consent_withdrawal_audited_allow_deny_unit_33_integration_32_e2e_2_build_format_security_audit_smoke_ok

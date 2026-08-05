@@ -1,7 +1,11 @@
 import Fastify, { LogController } from "fastify";
 import { loadEnvironment } from "@legacy/contracts/environment";
 import type { VaultRepository } from "@legacy/database/repository";
-import { registerVaultRoutes, type IdentityResolver } from "./routes/vault.js";
+import {
+  registerVaultRoutes,
+  type IdentityAuthorizer,
+  type IdentityResolver,
+} from "./routes/vault.js";
 import { registerBillingRoutes } from "./routes/billing.js";
 import type { StripeAdapter } from "./adapters/stripe.js";
 import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
@@ -10,6 +14,7 @@ import { createApplicationRuntime } from "./runtime.js";
 export interface ServerDependencies {
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
+  authorizeIdentity?: IdentityAuthorizer;
   stripe?: StripeAdapter;
   auth?: AuthHandler;
   authBaseUrl?: string;
@@ -17,8 +22,13 @@ export interface ServerDependencies {
 
 export function buildServer(dependencies?: ServerDependencies) {
   const environment = loadEnvironment(process.env);
-  if (environment.NODE_ENV === "production" && !dependencies)
-    throw new Error("production service dependencies are required");
+  if (
+    environment.NODE_ENV === "production" &&
+    (!dependencies?.auth || !dependencies.authorizeIdentity)
+  )
+    throw new Error(
+      "production authentication and authorization dependencies are required",
+    );
   const server = Fastify({
     logController: new LogController({ disableRequestLogging: true }),
     logger: {

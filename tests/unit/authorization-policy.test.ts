@@ -74,26 +74,30 @@ describe("service authorization policy", () => {
     expect(
       authorize({
         ...base,
-        supportApproval: {
-          approvedByOwnerId: "owner-1",
-          reasonCode: "ticket-verified",
-          categories: ["insurance"],
-          startsAt: "2026-08-05T11:30:00.000Z",
-          expiresAt: "2026-08-05T12:30:00.000Z",
-        },
+        supportApprovals: [
+          {
+            approvedByOwnerId: "owner-1",
+            reasonCode: "ticket-verified",
+            categories: ["insurance"],
+            startsAt: "2026-08-05T11:30:00.000Z",
+            expiresAt: "2026-08-05T12:30:00.000Z",
+          },
+        ],
       }),
     ).toEqual({ allowed: true, reason: "allow" });
     expect(
       authorize({
         ...base,
         purpose: "unrelated purpose",
-        supportApproval: {
-          approvedByOwnerId: "owner-1",
-          reasonCode: "ticket-verified",
-          categories: ["insurance"],
-          startsAt: "2026-08-05T11:30:00.000Z",
-          expiresAt: "2026-08-05T12:30:00.000Z",
-        },
+        supportApprovals: [
+          {
+            approvedByOwnerId: "owner-1",
+            reasonCode: "ticket-verified",
+            categories: ["insurance"],
+            startsAt: "2026-08-05T11:30:00.000Z",
+            expiresAt: "2026-08-05T12:30:00.000Z",
+          },
+        ],
       }),
     ).toEqual({ allowed: false, reason: "permission-denied" });
   });

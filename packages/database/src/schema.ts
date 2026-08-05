@@ -56,6 +56,18 @@ export const permissionGrants = pgTable("permission_grants", {
   revokedAt: timestamp("revoked_at", { withTimezone: true }),
   ...versioned,
 });
+export const supportAccessApprovals = pgTable("support_access_approvals", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  supportMembershipId: uuid("support_membership_id").notNull(),
+  approvedByOwnerId: uuid("approved_by_owner_id").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  categories: jsonb("categories").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  ...versioned,
+});
 export const documents = pgTable(
   "documents",
   {

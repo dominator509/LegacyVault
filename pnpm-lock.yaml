@@ -32,6 +32,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@legacy/audit':
+        specifier: workspace:*
+        version: link:../../packages/audit
       '@legacy/auth':
         specifier: workspace:*
         version: link:../../packages/auth
@@ -41,6 +44,9 @@ importers:
       '@legacy/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@legacy/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       fastify:
         specifier: 5.11.2
         version: 5.11.2

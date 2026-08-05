@@ -23,8 +23,8 @@ export interface AuthorizationRequest {
   now: string;
   sessionIssuedAt: string;
   mfaVerifiedAt?: string;
-  supportApproval?: SupportAccessApproval;
-  emergencyReleaseApproved?: boolean;
+  supportApprovals?: readonly SupportAccessApproval[];
+  emergencyReleaseCategories?: readonly RecordCategory[];
 }
 export interface AuthorizationDecision {
   allowed: boolean;
@@ -77,22 +77,26 @@ export function authorize(
   if (request.role === "PlatformAdmin")
     return { allowed: false, reason: "permission-denied" };
   if (request.role === "SupportAgent") {
-    const approval = request.supportApproval;
-    if (
-      !approval ||
-      approval.revokedAt ||
-      !approval.reasonCode.trim() ||
-      !approval.categories.includes(request.category) ||
-      Date.parse(approval.startsAt) > now ||
-      Date.parse(approval.expiresAt) <= now ||
-      Date.parse(approval.expiresAt) - Date.parse(approval.startsAt) >
-        4 * 60 * 60 * 1_000
-    )
+    const approved = request.supportApprovals?.some((approval) => {
+      const startsAt = Date.parse(approval.startsAt);
+      const expiresAt = Date.parse(approval.expiresAt);
+      return (
+        !approval.revokedAt &&
+        Boolean(approval.reasonCode.trim()) &&
+        approval.categories.includes(request.category) &&
+        Number.isFinite(startsAt) &&
+        Number.isFinite(expiresAt) &&
+        startsAt <= now &&
+        expiresAt > now &&
+        expiresAt - startsAt <= 4 * 60 * 60 * 1_000
+      );
+    });
+    if (!approved)
       return { allowed: false, reason: "support-approval-required" };
   }
   if (
     request.role === "EmergencyRecipient" &&
-    !request.emergencyReleaseApproved
+    !request.emergencyReleaseCategories?.includes(request.category)
   )
     return { allowed: false, reason: "emergency-release-required" };
   return permits(
@@ -104,4 +108,16 @@ export function authorize(
   )
     ? { allowed: true, reason: "allow" }
     : { allowed: false, reason: "permission-denied" };
+}
+
+export class AuthorizationDeniedError extends Error {
+  override readonly name = "AuthorizationDeniedError";
+  constructor(readonly reason: AuthorizationDecision["reason"]) {
+    super("access denied");
+  }
+}
+
+export function requireAuthorization(request: AuthorizationRequest): void {
+  const decision = authorize(request);
+  if (!decision.allowed) throw new AuthorizationDeniedError(decision.reason);
 }

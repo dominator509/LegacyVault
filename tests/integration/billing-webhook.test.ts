@@ -19,7 +19,18 @@ const stripe = new StripeAdapter({ webhookSecret: secret, timeoutMs: 2_000 });
 const server = buildServer({
   repository,
   stripe,
-  resolveIdentity: async () => ({ organizationId, householdId, actorId }),
+  resolveIdentity: async () => ({
+    organizationId,
+    householdId,
+    actorId,
+    membershipId: randomUUID(),
+    role: "Owner",
+    grants: [],
+    supportApprovals: [],
+    emergencyReleaseCategories: [],
+    sessionIssuedAt: new Date().toISOString(),
+    mfaVerifiedAt: new Date().toISOString(),
+  }),
 });
 
 beforeAll(async () => {

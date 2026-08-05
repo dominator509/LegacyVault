@@ -3,10 +3,34 @@ import type {
   ConfirmedFact,
   Identifier,
   IsoDateTime,
+  RecordCategory,
 } from "./entities.js";
 
 export class DomainInvariantError extends Error {
   override readonly name = "DomainInvariantError";
+}
+
+const recordCategories: ReadonlySet<RecordCategory> = new Set([
+  "contacts",
+  "advisers",
+  "dependents",
+  "pets",
+  "assets",
+  "liabilities",
+  "insurance",
+  "property",
+  "estate-documents",
+  "medical-summary",
+  "digital-asset-locations",
+  "household-instructions",
+  "funeral-preferences",
+]);
+
+export function recordCategoryFromFieldKey(fieldKey: string): RecordCategory {
+  const prefix = fieldKey.split(".", 1)[0];
+  if (!prefix || !recordCategories.has(prefix as RecordCategory))
+    throw new DomainInvariantError("fact field key has no canonical category");
+  return prefix as RecordCategory;
 }
 
 export function confirmFact(

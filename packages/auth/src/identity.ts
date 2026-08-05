@@ -7,6 +7,8 @@ import type {
   Role,
 } from "@legacy/domain";
 import { fromNodeHeaders } from "better-auth/node";
+import type { SupportAccessApproval } from "./policy.js";
+import { requireAuthorization } from "./policy.js";
 
 export class AuthenticationRequiredError extends Error {
   override readonly name = "AuthenticationRequiredError";
@@ -23,6 +25,8 @@ export interface ResolvedMembershipIdentity {
   membershipId: string;
   role: Role;
   grants: readonly PermissionGrant[];
+  supportApprovals: readonly SupportAccessApproval[];
+  emergencyReleaseCategories: readonly RecordCategory[];
 }
 
 export interface AuthenticatedTenantIdentity extends ResolvedMembershipIdentity {
@@ -143,6 +147,27 @@ export class MembershipIdentityStore {
         "select id,organization_id,household_id,membership_id,categories,actions,purpose,starts_at,expires_at,revoked_at,version from permission_grants where membership_id=$1 order by starts_at,id",
         [row.id],
       );
+      const supportRows =
+        row.role === "SupportAgent"
+          ? await client.query<{
+              approved_by_owner_id: string;
+              reason_code: string;
+              categories: unknown;
+              starts_at: Date;
+              expires_at: Date;
+              revoked_at: Date | null;
+            }>(
+              "select approved_by_owner_id,reason_code,categories,starts_at,expires_at,revoked_at from support_access_approvals where support_membership_id=$1 and revoked_at is null and starts_at<=now() and expires_at>now() order by expires_at,id",
+              [row.id],
+            )
+          : { rows: [] };
+      const emergencyRows =
+        row.role === "EmergencyRecipient"
+          ? await client.query<{ categories: unknown }>(
+              "select categories from emergency_access_requests where recipient_membership_id=$1 and status='released' and release_after is not null and release_after<=now() order by release_after,id",
+              [row.id],
+            )
+          : { rows: [] };
       const identity = {
         organizationId: row.organization_id,
         householdId: row.household_id,
@@ -170,6 +195,31 @@ export class MembershipIdentityStore {
             : {}),
           version: grant.version,
         })),
+        supportApprovals: supportRows.rows.map((approval) => ({
+          approvedByOwnerId: approval.approved_by_owner_id,
+          reasonCode: approval.reason_code,
+          categories: enumArray(
+            approval.categories,
+            categories,
+            "support approval categories",
+          ),
+          startsAt: approval.starts_at.toISOString(),
+          expiresAt: approval.expires_at.toISOString(),
+          ...(approval.revoked_at
+            ? { revokedAt: approval.revoked_at.toISOString() }
+            : {}),
+        })),
+        emergencyReleaseCategories: [
+          ...new Set(
+            emergencyRows.rows.flatMap((release) =>
+              enumArray(
+                release.categories,
+                categories,
+                "emergency release categories",
+              ),
+            ),
+          ),
+        ],
       };
       await client.query("commit");
       return identity;
@@ -180,6 +230,31 @@ export class MembershipIdentityStore {
       client.release();
     }
   }
+}
+
+export function requireIdentityAuthorization(
+  identity: AuthenticatedTenantIdentity,
+  request: {
+    category: RecordCategory;
+    action: PermissionAction;
+    purpose: string;
+    now?: string;
+  },
+): void {
+  requireAuthorization({
+    role: identity.role,
+    grants: identity.grants,
+    category: request.category,
+    action: request.action,
+    purpose: request.purpose,
+    now: request.now ?? new Date().toISOString(),
+    sessionIssuedAt: identity.sessionIssuedAt,
+    ...(identity.mfaVerifiedAt
+      ? { mfaVerifiedAt: identity.mfaVerifiedAt }
+      : {}),
+    supportApprovals: identity.supportApprovals,
+    emergencyReleaseCategories: identity.emergencyReleaseCategories,
+  });
 }
 
 export interface AuthSessionReader {

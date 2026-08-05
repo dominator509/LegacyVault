@@ -1,7 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { PostgresAuditStore } from "@legacy/audit";
 import {
+  AuthorizationDeniedError,
   createLegacyAuth,
   MembershipIdentityStore,
+  requireIdentityAuthorization,
   resolveRequestIdentity,
 } from "@legacy/auth";
 import type { Environment } from "@legacy/contracts/environment";
@@ -33,6 +36,7 @@ export function createApplicationRuntime(environment: Environment): {
   if (
     !environment.DATABASE_URL ||
     !environment.SESSION_SECRET ||
+    !environment.AUDIT_HMAC_KEY ||
     !environment.API_BASE_URL ||
     !environment.APP_BASE_URL ||
     !environment.EMAIL_FROM
@@ -40,6 +44,9 @@ export function createApplicationRuntime(environment: Environment): {
     throw new Error("application runtime configuration is incomplete");
   const repository = new VaultRepository(environment.DATABASE_URL);
   const identityStore = new MembershipIdentityStore(environment.DATABASE_URL);
+  const auditKey = Buffer.from(environment.AUDIT_HMAC_KEY, "base64");
+  if (auditKey.byteLength < 32) throw new Error("audit HMAC key is invalid");
+  const auditStore = new PostgresAuditStore(environment.DATABASE_URL, auditKey);
   const email = environment.LOCAL_ENGINEERING_MODE
     ? new LocalSmtpCaptureAdapter({
         host: "127.0.0.1",
@@ -107,12 +114,44 @@ export function createApplicationRuntime(environment: Environment): {
           identityStore,
           request.headers,
         ),
+      authorizeIdentity: async (identity, scope) => {
+        try {
+          requireIdentityAuthorization(identity, scope);
+          await auditStore.append(identity, {
+            id: randomUUID(),
+            occurredAt: new Date().toISOString(),
+            actorId: identity.actorId,
+            action: scope.purpose,
+            outcome: "allowed",
+            metadata: {
+              category: scope.category,
+              permission_action: scope.action,
+            },
+          });
+        } catch (error) {
+          if (error instanceof AuthorizationDeniedError)
+            await auditStore.append(identity, {
+              id: randomUUID(),
+              occurredAt: new Date().toISOString(),
+              actorId: identity.actorId,
+              action: scope.purpose,
+              outcome: "denied",
+              metadata: {
+                category: scope.category,
+                permission_action: scope.action,
+                decision_reason: error.reason,
+              },
+            });
+          throw error;
+        }
+      },
     },
     async close() {
       await Promise.all([
         repository.close(),
         identityStore.close(),
         authRuntime.close(),
+        auditStore.close(),
       ]);
     },
   };

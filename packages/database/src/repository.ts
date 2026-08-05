@@ -123,6 +123,21 @@ export class VaultRepository {
     });
   }
 
+  async getFactFieldKey(
+    context: TenantContext,
+    factId: string,
+  ): Promise<string> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{ field_key: string }>(
+        "select field_key from facts where id=$1",
+        [factId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("fact unavailable");
+      return row.field_key;
+    });
+  }
+
   async recordConsent(
     context: TenantContext,
     input: {
@@ -148,6 +163,31 @@ export class VaultRepository {
       const row = result.rows[0];
       if (!row) throw new Error("consent insert returned no row");
       return row;
+    });
+  }
+
+  async withdrawConsent(
+    context: TenantContext,
+    consentId: string,
+    expectedVersion: number,
+    withdrawnAt: string,
+  ): Promise<{ id: string; withdrawnAt: string; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        withdrawn_at: Date;
+        version: number;
+      }>(
+        "update consents set withdrawn_at=$1,version=version+1 where id=$2 and version=$3 and withdrawn_at is null returning id,withdrawn_at,version",
+        [withdrawnAt, consentId, expectedVersion],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("consent withdrawal conflict or unavailable");
+      return {
+        id: row.id,
+        withdrawnAt: row.withdrawn_at.toISOString(),
+        version: row.version,
+      };
     });
   }
 

@@ -4,6 +4,8 @@ import { loadEnvironment } from "../../packages/contracts/src/environment.js";
 import { createApplicationRuntime } from "../../apps/api/src/runtime.js";
 import { buildServer } from "../../apps/api/src/server.js";
 import { runMigrations } from "../../packages/database/src/migrate.js";
+import { createDatabaseClient } from "../../packages/database/src/client.js";
+import { AuthorizationDeniedError } from "../../packages/auth/src/index.js";
 import { readLocalEnvironment } from "../helpers/local-environment.js";
 
 interface MailpitSummary {
@@ -18,6 +20,7 @@ const environment = loadEnvironment({
   LOCAL_ENGINEERING_MODE: "true",
   DATABASE_URL: local.TEST_DATABASE_URL,
   SESSION_SECRET: local.SESSION_SECRET,
+  AUDIT_HMAC_KEY: local.AUDIT_HMAC_KEY,
   API_BASE_URL: "http://127.0.0.1:3001",
   APP_BASE_URL: "http://127.0.0.1:3000",
   EMAIL_FROM: "Legacy Vault <notices@localhost.invalid>",
@@ -69,4 +72,90 @@ describe("composed application runtime", () => {
     expect(text).toContain("/api/auth/verify-email");
     expect(text).toContain("This link expires in 30 minutes.");
   }, 20_000);
+
+  it("fails closed through the production authorizer and appends content-free allow and deny decisions", async () => {
+    const organizationId = randomUUID();
+    const householdId = randomUUID();
+    const actorId = randomUUID();
+    const client = createDatabaseClient(environment.DATABASE_URL ?? "");
+    await client.connect();
+    try {
+      await client.query("begin");
+      await client.query("select set_config('app.organization_id',$1,true)", [
+        organizationId,
+      ]);
+      await client.query("insert into organizations(id,name) values ($1,$2)", [
+        organizationId,
+        "Runtime Authorization Organization",
+      ]);
+      await client.query("select set_config('app.household_id',$1,true)", [
+        householdId,
+      ]);
+      await client.query(
+        "insert into households(id,organization_id,name) values ($1,$2,$3)",
+        [householdId, organizationId, "Runtime Authorization Household"],
+      );
+      await client.query("commit");
+
+      const now = new Date().toISOString();
+      const identity = {
+        organizationId,
+        householdId,
+        actorId,
+        membershipId: randomUUID(),
+        role: "Owner" as const,
+        grants: [],
+        supportApprovals: [],
+        emergencyReleaseCategories: [],
+        sessionIssuedAt: now,
+        mfaVerifiedAt: now,
+      };
+      await runtime.dependencies.authorizeIdentity?.(identity, {
+        category: "insurance",
+        action: "create",
+        purpose: "vault.fact.create",
+      });
+      const { mfaVerifiedAt: _mfaVerifiedAt, ...identityWithoutMfa } = identity;
+      await expect(
+        runtime.dependencies.authorizeIdentity?.(identityWithoutMfa, {
+          category: "insurance",
+          action: "create",
+          purpose: "vault.fact.create",
+        }),
+      ).rejects.toBeInstanceOf(AuthorizationDeniedError);
+
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [organizationId, householdId],
+      );
+      const events = await client.query<{
+        action: string;
+        outcome: string;
+        metadata: Record<string, unknown>;
+      }>("select action,outcome,metadata from audit_events order by sequence");
+      await client.query("commit");
+      expect(events.rows).toEqual([
+        {
+          action: "vault.fact.create",
+          outcome: "allowed",
+          metadata: {
+            category: "insurance",
+            permission_action: "create",
+          },
+        },
+        {
+          action: "vault.fact.create",
+          outcome: "denied",
+          metadata: {
+            category: "insurance",
+            permission_action: "create",
+            decision_reason: "mfa-required",
+          },
+        },
+      ]);
+    } finally {
+      await client.end();
+    }
+  });
 });

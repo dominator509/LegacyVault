@@ -3,14 +3,26 @@ import type {
   TenantContext,
   VaultRepository,
 } from "@legacy/database/repository";
+import { recordCategoryFromFieldKey } from "@legacy/domain";
 import {
   AuthenticationRequiredError,
+  AuthorizationDeniedError,
+  type AuthenticatedTenantIdentity,
   HouseholdSelectionRequiredError,
 } from "@legacy/auth";
+import type { PermissionAction, RecordCategory } from "@legacy/domain";
 
 export type IdentityResolver = (
   request: FastifyRequest,
-) => Promise<TenantContext>;
+) => Promise<AuthenticatedTenantIdentity>;
+export type IdentityAuthorizer = (
+  identity: AuthenticatedTenantIdentity,
+  scope: {
+    category: RecordCategory;
+    action: PermissionAction;
+    purpose: string;
+  },
+) => void | Promise<void>;
 
 class ApiProblem extends Error {
   constructor(
@@ -79,11 +91,24 @@ function requiredPositiveInteger(
   return value as number;
 }
 
+function factCategory(fieldKey: string): RecordCategory {
+  try {
+    return recordCategoryFromFieldKey(fieldKey);
+  } catch {
+    throw new ApiProblem(
+      400,
+      "Invalid request",
+      "fieldKey must begin with a canonical record category",
+    );
+  }
+}
+
 export async function registerVaultRoutes(
   server: FastifyInstance,
   dependencies: {
     repository: VaultRepository;
     resolveIdentity: IdentityResolver;
+    authorizeIdentity?: IdentityAuthorizer;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -103,15 +128,18 @@ export async function registerVaultRoutes(
                 "Household selection required",
                 "Select an accessible household.",
               )
-            : new ApiProblem(
-                message.includes("conflict") || message.includes("idempotency")
-                  ? 409
-                  : 500,
-                message.includes("conflict")
-                  ? "Version conflict"
-                  : "Request failed",
-                "The request could not be completed.",
-              );
+            : error instanceof AuthorizationDeniedError
+              ? new ApiProblem(403, "Access denied", "Access is denied.")
+              : new ApiProblem(
+                  message.includes("conflict") ||
+                    message.includes("idempotency")
+                    ? 409
+                    : 500,
+                  message.includes("conflict")
+                    ? "Version conflict"
+                    : "Request failed",
+                  "The request could not be completed.",
+                );
     return reply.code(problem.status).type("application/problem+json").send({
       type: "about:blank",
       title: problem.title,
@@ -179,6 +207,11 @@ export async function registerVaultRoutes(
         : {}),
       sensitivity,
     };
+    await dependencies.authorizeIdentity?.(identity, {
+      category: factCategory(candidate.fieldKey),
+      action: "create",
+      purpose: "vault.fact.create",
+    });
     const reservation = await dependencies.repository.reserveIdempotency(
       identity,
       key,
@@ -210,6 +243,15 @@ export async function registerVaultRoutes(
     "/v1/facts/:id/confirm",
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
+      const fieldKey = await dependencies.repository.getFactFieldKey(
+        identity,
+        request.params.id,
+      );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: factCategory(fieldKey),
+        action: "approve",
+        purpose: "vault.fact.confirm",
+      });
       const key = idempotencyKey(request);
       const expectedVersion = Number(request.headers["if-match"]);
       if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
@@ -253,6 +295,23 @@ export async function registerVaultRoutes(
   server.post("/v1/consents", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);
     const body = objectBody(request.body);
+    await dependencies.authorizeIdentity?.(identity, {
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.consent.record",
+    });
+    const purpose = requiredString(body, "purpose");
+    if (
+      ![
+        "external-ai",
+        "sensitive-data",
+        "document-processing",
+        "transactional-email",
+        "terms",
+        "privacy-policy",
+      ].includes(purpose)
+    )
+      throw new ApiProblem(400, "Invalid request", "purpose is invalid");
     const key = idempotencyKey(request);
     const reservation = await dependencies.repository.reserveIdempotency(
       identity,
@@ -264,8 +323,8 @@ export async function registerVaultRoutes(
         .code(reservation.statusCode ?? 409)
         .send(reservation.responseBody ?? { status: "processing" });
     const consent = await dependencies.repository.recordConsent(identity, {
-      personId: requiredString(body, "personId"),
-      purpose: requiredString(body, "purpose"),
+      personId: requiredUuid(body, "personId"),
+      purpose,
       policyVersion: requiredString(body, "policyVersion"),
       grantedAt: new Date().toISOString(),
     });
@@ -278,9 +337,62 @@ export async function registerVaultRoutes(
     return reply.code(201).send(consent);
   });
 
+  server.post<{ Params: { id: string } }>(
+    "/v1/consents/:id/withdraw",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.consent.withdraw",
+      });
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "consent id is invalid");
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const key = idempotencyKey(request);
+      const requestShape = {
+        consentId: request.params.id,
+        expectedVersion,
+      };
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        requestShape,
+      );
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      const withdrawn = await dependencies.repository.withdrawConsent(
+        identity,
+        request.params.id,
+        expectedVersion,
+        new Date().toISOString(),
+      );
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        200,
+        withdrawn,
+      );
+      return reply.send(withdrawn);
+    },
+  );
+
   server.post("/v1/privacy-requests", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);
     const body = objectBody(request.body);
+    await dependencies.authorizeIdentity?.(identity, {
+      category: "household-instructions",
+      action: "create",
+      purpose: "vault.privacy-request.create",
+    });
     const kind = requiredString(body, "kind");
     if (
       !["access", "correction", "export", "deletion", "appeal"].includes(kind)
