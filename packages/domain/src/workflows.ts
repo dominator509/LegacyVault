@@ -95,8 +95,19 @@ export function completeWorkflowStep(
   if (workflow.completedSteps.includes(step)) return workflow;
   const completedSteps = [...workflow.completedSteps, step];
   if (nextStep) {
-    return { ...workflow, completedSteps, status: "running", nextStep, version: workflow.version + 1 };
+    return {
+      ...workflow,
+      completedSteps,
+      status: "running",
+      nextStep,
+      version: workflow.version + 1,
+    };
   }
   const { nextStep: _completedStep, ...withoutNextStep } = workflow;
-  return { ...withoutNextStep, completedSteps, status: "completed", version: workflow.version + 1 };
+  return {
+    ...withoutNextStep,
+    completedSteps,
+    status: "completed",
+    version: workflow.version + 1,
+  };
 }

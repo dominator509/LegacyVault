@@ -63,6 +63,7 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 # 11. Progress
 - [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
+- [x] Continuation proof: 10 domain invariant tests pass within the 13-test unit suite; format, build, security, dependency audit, and reality gates pass.
 
 # 12. Surprises & Discoveries
 - Exact optional property semantics require completed workflows to omit `nextStep`, not assign `undefined`.
@@ -71,4 +72,4 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 - ADR-017 defines reviewed lockfile refreshes for graph-node workspace changes.
 
 # 14. Outcomes & Retrospective
-- Complete only after NODE_DONE.
+- Domain engineering is locally proven. The M2 `verify: ok` sentinel, NODE_DONE, and green tag remain withheld because unchanged external preflight requirements stop the full gate.
