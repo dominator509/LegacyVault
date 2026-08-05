@@ -6,7 +6,11 @@ export function buildServer() {
   const server = Fastify({
     logger: {
       level: environment.LOG_LEVEL,
-      redact: ["req.headers.authorization", "req.headers.cookie", "res.headers.set-cookie"],
+      redact: [
+        "req.headers.authorization",
+        "req.headers.cookie",
+        "res.headers.set-cookie",
+      ],
     },
     requestIdHeader: "x-request-id",
   });
@@ -14,7 +18,9 @@ export function buildServer() {
   server.get("/health/live", async () => ({ status: "live" as const }));
   server.get("/health/ready", async (_request, reply) => {
     if (!environment.LOCAL_ENGINEERING_MODE && !environment.DATABASE_URL) {
-      return reply.code(503).send({ status: "not-ready", reason: "database-unconfigured" });
+      return reply
+        .code(503)
+        .send({ status: "not-ready", reason: "database-unconfigured" });
     }
     return { status: "ready" as const };
   });
@@ -33,7 +39,9 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\\\", "/")}`) {
   main().catch((error: unknown) => {
-    process.stderr.write(`api startup failed: ${error instanceof Error ? error.name : "unknown"}\n`);
+    process.stderr.write(
+      `api startup failed: ${error instanceof Error ? error.name : "unknown"}\n`,
+    );
     process.exitCode = 1;
   });
 }

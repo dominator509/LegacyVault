@@ -3,8 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { "./environment": "./src/environment.ts" },
-  "scripts": { "build": "tsc -p tsconfig.json" },
-  "dependencies": { "zod": "4.4.3" },
-  "devDependencies": { "typescript": "7.0.2" }
+  "exports": {
+    "./environment": "./src/environment.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
 }

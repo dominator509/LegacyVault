@@ -42,7 +42,7 @@ The operator must place signed or approved evidence under `compliance/evidence/`
 
 PREFLIGHT-TABLE-BEGIN
 DATABASE_URL|REQUIRED|scripts/probes/database_url.sh
-TEST_DATABASE_URL|REQUIRED|scripts/probes/database_url.sh
+TEST_DATABASE_URL|REQUIRED|scripts/probes/test_database_url.sh
 REDIS_URL|REQUIRED|scripts/probes/redis_url.sh
 DEEPSEEK_API_KEY|REQUIRED|scripts/probes/deepseek_api_key.sh
 DEEPSEEK_BASE_URL|REQUIRED|-

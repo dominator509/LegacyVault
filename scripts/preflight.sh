@@ -9,7 +9,11 @@ set -a; . ./.env; set +a
 TMP=$(mktemp); trap 'rm -f "$TMP"' EXIT
 awk '/^PREFLIGHT-TABLE-BEGIN$/{t=1;next} /^PREFLIGHT-TABLE-END$/{t=0} t && NF' PREFLIGHT.md > "$TMP"
 [ -s "$TMP" ] || fail "PREFLIGHT-TABLE missing or empty"
-if command -v timeout >/dev/null 2>&1; then TCMD="timeout 30"; else TCMD=""; fi
+if command -v timeout >/dev/null 2>&1 && timeout --version 2>/dev/null | grep -q "GNU coreutils"; then
+  TCMD="timeout 30"
+else
+  TCMD=""
+fi
 while IFS='|' read -r var req probe; do
   eval "val=\${$var:-}"
   if [ -z "$val" ]; then [ "$req" = OPTIONAL ] && continue; fail "env var not set: $var"; fi

@@ -66,14 +66,17 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 # 11. Progress
 - [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
+- [x] Continuation proof: unit, real local integration, TCP E2E, smoke, build, format, security, dependency audit, and reality gates pass; full verify remains externally gated.
 
 # 12. Surprises & Discoveries
 - The original install gate required a frozen lockfile before EP-001 had created one; ADR-011 permits first-generation only and freezes every subsequent install.
 - The installed Docker client initially had no running engine; Docker Desktop started successfully and reported Engine 29.5.3.
+- Windows HNS excluded ports 55284-55783; the local stack uses 15432, 16379, 19000, and 19001 and all four services are healthy.
+- Preflight now passes real local PostgreSQL and Valkey probes and stops at the first genuinely missing external item, `DEEPSEEK_API_KEY`.
 
 # 13. Decision Log
 - ADR-010 added the missing authorized bootstrap, local-infrastructure, and migration commands.
 - ADR-011 defined deterministic first-lockfile generation.
 
 # 14. Outcomes & Retrospective
-- Complete only after NODE_DONE.
+- Foundation engineering checkpoint is locally proven but the node remains incomplete: no M2 sentinel, NODE_DONE, or green tag exists while external preflight requirements remain unsupplied.
