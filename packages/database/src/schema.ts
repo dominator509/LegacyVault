@@ -106,6 +106,17 @@ export const evidence = pgTable("evidence", {
   capturedAt: timestamp("captured_at", { withTimezone: true }).notNull(),
   ...versioned,
 });
+export const documentDerivatives = pgTable("document_derivatives", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  documentId: uuid("document_id").notNull(),
+  kind: text("kind").notNull(),
+  objectKey: text("object_key").notNull(),
+  ciphertextSha256: text("ciphertext_sha256").notNull(),
+  encryptionKeyVersion: integer("encryption_key_version").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  ...versioned,
+});
 export const facts = pgTable("facts", {
   id: uuid("id").primaryKey(),
   ...tenant,

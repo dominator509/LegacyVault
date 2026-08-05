@@ -621,6 +621,53 @@ export class VaultRepository {
     });
   }
 
+  async completeDocumentOcr(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      workflowVersion: number;
+      derivativeId: string;
+      objectKey: string;
+      ciphertextSha256: string;
+      encryptionKeyVersion: number;
+      createdAt: string;
+    },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      await client.query(
+        "insert into document_derivatives(id,organization_id,household_id,document_id,kind,object_key,ciphertext_sha256,encryption_key_version,created_at) values ($1,$2,$3,$4,'searchable-pdf',$5,$6,$7,$8) on conflict (document_id,kind) do nothing",
+        [
+          input.derivativeId,
+          context.organizationId,
+          context.householdId,
+          input.documentId,
+          input.objectKey,
+          input.ciphertextSha256,
+          input.encryptionKeyVersion,
+          input.createdAt,
+        ],
+      );
+      const derivative = await client.query(
+        "select 1 from document_derivatives where document_id=$1 and kind='searchable-pdf' and object_key=$2 and ciphertext_sha256=$3 and encryption_key_version=$4",
+        [
+          input.documentId,
+          input.objectKey,
+          input.ciphertextSha256,
+          input.encryptionKeyVersion,
+        ],
+      );
+      if (derivative.rowCount !== 1)
+        throw new Error("document OCR derivative conflict");
+      const workflow = await client.query(
+        "update workflow_runs set status='running',completed_steps=case when completed_steps ? 'ocr' then completed_steps else completed_steps || '[\"ocr\"]'::jsonb end,next_step='classification',last_error_class=null,version=version+1 where id=$1 and version=$2 and next_step='ocr'",
+        [input.workflowId, input.workflowVersion],
+      );
+      if (workflow.rowCount !== 1)
+        throw new Error("document OCR workflow conflict");
+    });
+  }
+
   async withdrawConsent(
     context: TenantContext,
     consentId: string,

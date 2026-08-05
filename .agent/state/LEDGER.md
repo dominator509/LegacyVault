@@ -137,3 +137,8 @@
 2026-08-05T23:28:41Z | codex | EP-004 | SIG | format_check_exit_1_document_scan_worker_style_only_type_and_security_ok
 2026-08-05T23:28:41Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
 2026-08-05T23:30:58Z | codex | EP-004 | HEARTBEAT | worker_only_document_key_unwrap_plaintext_checksum_MIME_and_real_ClamAV_scan_persisted_next_OCR_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T23:34:43Z | codex | EP-004 | SIG | focused_OCR_workflow_container_exit_2_InputFileError_on_minimal_signature_only_PDF_fixture
+2026-08-05T23:34:43Z | codex | EP-004 | HYPOTHESIS | replace_minimal_upload_bytes_with_the_existing_structurally_valid_image_only_PDF_fixture
+2026-08-05T23:36:01Z | codex | EP-004 | SIG | format_check_exit_1_OCR_worker_storage_and_runtime_proof_style_only_type_and_security_ok
+2026-08-05T23:36:01Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T23:38:32Z | codex | EP-004 | HEARTBEAT | isolated_digest_pinned_OCR_encrypted_searchable_derivative_checksum_RLS_provenance_next_classification_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok

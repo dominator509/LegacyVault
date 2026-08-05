@@ -8,9 +8,13 @@ import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { AuthorizationDeniedError } from "../../packages/auth/src/index.js";
 import {
   ClamAvScanner,
+  DockerOcrMyPdfAdapter,
   DocumentObjectStore,
 } from "../../packages/documents/src/index.js";
-import { createDocumentScanWorkflowHandler } from "../../apps/worker/src/index.js";
+import {
+  createDocumentOcrWorkflowHandler,
+  createDocumentScanWorkflowHandler,
+} from "../../apps/worker/src/index.js";
 import {
   decryptEnvelope,
   encryptEnvelope,
@@ -23,6 +27,28 @@ interface MailpitSummary {
   ID: string;
   Subject: string;
   To: { Address: string }[];
+}
+
+function imageOnlyPdf(): Buffer {
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>",
+    "<< /Length 35 >>\nstream\nq\n200 0 0 200 0 0 cm\n/Im0 Do\nQ\nendstream",
+    "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 9 >>\nstream\n00FFFFFF>\nendstream",
+  ];
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xref = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1))
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(pdf);
 }
 
 const local = readLocalEnvironment();
@@ -288,9 +314,7 @@ describe("composed application runtime", () => {
         }),
       ]);
 
-      const documentPlaintext = Buffer.from(
-        "%PDF-1.7\nRuntime encrypted upload proof\n%%EOF",
-      );
+      const documentPlaintext = imageOnlyPdf();
       const documentIdempotencyKey = `runtime-document-${randomUUID()}`;
       const documentUpload = await runtime.dependencies.startDocumentUpload?.(
         identity,
@@ -446,6 +470,67 @@ describe("composed application runtime", () => {
         expect(
           await scanObjectStore.objectStatus(persistedDocument.objectKey),
         ).toBe("clean");
+        const ocr = createDocumentOcrWorkflowHandler({
+          repository: runtime.dependencies.repository,
+          householdKeyStore: scanKeyStore,
+          objectStore: scanObjectStore,
+          ocr: new DockerOcrMyPdfAdapter({
+            dockerExecutable: "docker",
+            image:
+              "jbarlow83/ocrmypdf:v17.8.1@sha256:0563a68359fe4e68022974103794a69d5d37270686f99c9030a7667ebbb639d4",
+            timeoutMs: 120_000,
+          }),
+        });
+        await ocr({
+          workflowId: documentProcessing?.workflow.id ?? "",
+          organizationId,
+          householdId,
+          actorId,
+        });
+        await client.query("begin");
+        await client.query(
+          "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+          [organizationId, householdId],
+        );
+        const derivative = await client.query<{
+          id: string;
+          object_key: string;
+          ciphertext_sha256: string;
+          next_step: string;
+          workflow_status: string;
+        }>(
+          "select dd.id,dd.object_key,dd.ciphertext_sha256,w.next_step,w.status as workflow_status from document_derivatives dd join workflow_runs w on w.subject_id=dd.document_id where dd.document_id=$1",
+          [documentUpload?.document.id],
+        );
+        await client.query("commit");
+        expect(derivative.rows[0]).toMatchObject({
+          id: documentUpload?.document.id,
+          next_step: "classification",
+          workflow_status: "running",
+        });
+        const encryptedSearchablePdf = await scanObjectStore.getCiphertext(
+          derivative.rows[0]?.object_key ?? "",
+        );
+        expect(
+          createHash("sha256").update(encryptedSearchablePdf).digest("hex"),
+        ).toBe(derivative.rows[0]?.ciphertext_sha256);
+        const searchableEnvelope = JSON.parse(
+          Buffer.from(encryptedSearchablePdf).toString("utf8"),
+        ) as EncryptedEnvelope;
+        const searchablePdf = decryptEnvelope(searchableEnvelope, documentKey, {
+          organizationId,
+          householdId,
+          recordId: documentUpload?.document.id ?? "",
+          purpose: "document-searchable-pdf",
+          keyVersion: documentUpload?.encryption.keyVersion ?? 0,
+        });
+        expect(
+          Buffer.from(searchablePdf.subarray(0, 5)).toString("ascii"),
+        ).toBe("%PDF-");
+        searchablePdf.fill(0);
+        await scanObjectStore.deleteObject(
+          derivative.rows[0]?.object_key ?? "",
+        );
         await scanObjectStore.deleteObject(persistedDocument.objectKey);
       } finally {
         await scanKeyStore.close();

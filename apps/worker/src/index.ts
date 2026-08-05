@@ -86,6 +86,31 @@ export interface DocumentProcessingRepository {
     context: TenantContext,
     input: { documentId: string; workflowId: string; errorClass: string },
   ): Promise<void>;
+  completeDocumentOcr(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      workflowId: string;
+      workflowVersion: number;
+      derivativeId: string;
+      objectKey: string;
+      ciphertextSha256: string;
+      encryptionKeyVersion: number;
+      createdAt: string;
+    },
+  ): Promise<void>;
+}
+
+export interface DocumentOcrObjectStore extends QuarantineObjectStore {
+  putDocumentDerivative(input: {
+    objectKey: string;
+    ciphertext: Uint8Array;
+    checksumSha256Base64: string;
+  }): Promise<void>;
+}
+
+export interface DocumentOcrAdapter {
+  extractSearchablePdf(input: Uint8Array): Promise<Uint8Array>;
 }
 
 function storedEnvelope(value: unknown): EncryptedEnvelope {
@@ -305,6 +330,123 @@ export function createDocumentScanWorkflowHandler(input: {
           errorClass: error instanceof Error ? error.name : "UnknownError",
         });
       throw error;
+    }
+  };
+}
+
+export function createDocumentOcrWorkflowHandler(input: {
+  repository: DocumentProcessingRepository;
+  householdKeyStore: PostgresHouseholdKeyStore;
+  objectStore: DocumentOcrObjectStore;
+  ocr: DocumentOcrAdapter;
+}): WorkflowHandler {
+  return async (data) => {
+    const context = {
+      organizationId: data.organizationId,
+      householdId: data.householdId,
+      actorId: data.actorId,
+    };
+    let document: DocumentProcessingInput | undefined;
+    let householdKey:
+      { plaintextKey: Uint8Array; keyVersion: number } | undefined;
+    let dataKey: Uint8Array | undefined;
+    let plaintext: Uint8Array | undefined;
+    let searchablePdf: Uint8Array | undefined;
+    try {
+      document = await input.repository.getDocumentProcessingInput(
+        context,
+        data.workflowId,
+      );
+      if (document.nextStep !== "ocr") return;
+      if (document.status !== "clean")
+        throw new Error("document has not passed malware scanning");
+      if (document.mediaType !== "application/pdf")
+        throw new Error("document OCR media type is not yet supported");
+      householdKey =
+        await input.householdKeyStore.getOrCreateActiveKey(context);
+      dataKey = decryptEnvelope(
+        storedEnvelope(document.wrappedDataKey),
+        householdKey.plaintextKey,
+        {
+          organizationId: context.organizationId,
+          householdId: context.householdId,
+          recordId: document.id,
+          purpose: "document-data-key",
+          keyVersion: document.encryptionKeyVersion,
+        },
+      );
+      const ciphertext = await input.objectStore.getCiphertext(
+        document.objectKey,
+      );
+      let envelope: unknown;
+      try {
+        envelope = JSON.parse(Buffer.from(ciphertext).toString("utf8"));
+      } catch {
+        throw new ObjectIntegrityError(
+          "document ciphertext envelope is invalid",
+        );
+      }
+      plaintext = decryptEnvelope(storedEnvelope(envelope), dataKey, {
+        organizationId: context.organizationId,
+        householdId: context.householdId,
+        recordId: document.id,
+        purpose: "document-original",
+        keyVersion: document.encryptionKeyVersion,
+      });
+      const originalDigest = createHash("sha256")
+        .update(plaintext)
+        .digest("hex");
+      if (originalDigest !== document.originalSha256)
+        throw new ObjectIntegrityError("document plaintext checksum mismatch");
+      searchablePdf = await input.ocr.extractSearchablePdf(plaintext);
+      const derivativeId = document.id;
+      const encryptedDerivative = Buffer.from(
+        JSON.stringify(
+          encryptEnvelope(searchablePdf, dataKey, {
+            organizationId: context.organizationId,
+            householdId: context.householdId,
+            recordId: derivativeId,
+            purpose: "document-searchable-pdf",
+            keyVersion: document.encryptionKeyVersion,
+          }),
+        ),
+      );
+      try {
+        const digest = createHash("sha256")
+          .update(encryptedDerivative)
+          .digest();
+        const objectKey = `derivatives/${document.id}/${derivativeId}.encrypted.json`;
+        await input.objectStore.putDocumentDerivative({
+          objectKey,
+          ciphertext: encryptedDerivative,
+          checksumSha256Base64: digest.toString("base64"),
+        });
+        await input.repository.completeDocumentOcr(context, {
+          documentId: document.id,
+          workflowId: document.workflowId,
+          workflowVersion: document.workflowVersion,
+          derivativeId,
+          objectKey,
+          ciphertextSha256: digest.toString("hex"),
+          encryptionKeyVersion: document.encryptionKeyVersion,
+          createdAt: new Date().toISOString(),
+        });
+      } finally {
+        encryptedDerivative.fill(0);
+      }
+    } catch (error) {
+      if (document)
+        await input.repository.recordDocumentScanFailure(context, {
+          documentId: document.id,
+          workflowId: document.workflowId,
+          errorClass: error instanceof Error ? error.name : "UnknownError",
+        });
+      throw error;
+    } finally {
+      searchablePdf?.fill(0);
+      plaintext?.fill(0);
+      dataKey?.fill(0);
+      householdKey?.plaintextKey.fill(0);
     }
   };
 }

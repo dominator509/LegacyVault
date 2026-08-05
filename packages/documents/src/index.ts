@@ -445,6 +445,31 @@ export class DocumentObjectStore {
     );
   }
 
+  async putDocumentDerivative(input: {
+    objectKey: string;
+    ciphertext: Uint8Array;
+    checksumSha256Base64: string;
+  }): Promise<void> {
+    if (
+      !/^derivatives\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.encrypted\.json$/iu.test(
+        input.objectKey,
+      )
+    )
+      throw new ObjectIntegrityError(
+        "document derivative object key is invalid",
+      );
+    await this.#client.send(
+      new PutObjectCommand({
+        Bucket: this.config.bucket,
+        Key: input.objectKey,
+        Body: input.ciphertext,
+        ChecksumSHA256: input.checksumSha256Base64,
+        ContentType: "application/vnd.legacy-vault.encrypted+json",
+        Tagging: "status=clean&kind=searchable-pdf",
+      }),
+    );
+  }
+
   async assertStoredChecksum(
     objectKey: string,
     checksumSha256Base64: string,
