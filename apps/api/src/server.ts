@@ -24,6 +24,14 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     input: { idempotencyKey: string; exportKey: Uint8Array },
   ) => Promise<StartedPortableExport>;
+  encryptFactValue?: (
+    identity: AuthenticatedTenantIdentity,
+    input: { fieldKey: string; plaintext: Uint8Array },
+  ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+  createReport?: (
+    identity: AuthenticatedTenantIdentity,
+    kind: "family-emergency-guide" | "executor-preparation-packet",
+  ) => Promise<{ id: string; kind: string; version: number }>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -32,7 +40,9 @@ export function buildServer(dependencies?: ServerDependencies) {
     environment.NODE_ENV === "production" &&
     (!dependencies?.auth ||
       !dependencies.authorizeIdentity ||
-      !dependencies.startPortableExport)
+      !dependencies.startPortableExport ||
+      !dependencies.encryptFactValue ||
+      !dependencies.createReport)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",

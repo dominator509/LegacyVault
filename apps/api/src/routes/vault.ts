@@ -14,6 +14,7 @@ import {
   HouseholdSelectionRequiredError,
 } from "@legacy/auth";
 import type { PermissionAction, RecordCategory } from "@legacy/domain";
+import { scanDlp } from "@legacy/ai-gateway";
 
 export type IdentityResolver = (
   request: FastifyRequest,
@@ -116,6 +117,14 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       input: { idempotencyKey: string; exportKey: Uint8Array },
     ) => Promise<unknown>;
+    encryptFactValue?: (
+      identity: AuthenticatedTenantIdentity,
+      input: { fieldKey: string; plaintext: Uint8Array },
+    ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+    createReport?: (
+      identity: AuthenticatedTenantIdentity,
+      kind: "family-emergency-guide" | "executor-preparation-packet",
+    ) => Promise<unknown>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -161,24 +170,33 @@ export async function registerVaultRoutes(
     const identity = await dependencies.resolveIdentity(request);
     const body = objectBody(request.body);
     const key = idempotencyKey(request);
-    const ciphertextBase64 = requiredString(body, "ciphertextBase64");
-    if (
-      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
-        ciphertextBase64,
-      )
-    )
+    if (!dependencies.encryptFactValue)
       throw new ApiProblem(
-        400,
-        "Invalid request",
-        "ciphertextBase64 is invalid",
+        503,
+        "Fact encryption unavailable",
+        "Fact encryption is not configured.",
       );
-    const ciphertext = Buffer.from(ciphertextBase64, "base64");
-    if (ciphertext.length < 17)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "encrypted fact envelope is invalid",
+    if (!Object.hasOwn(body, "value"))
+      throw new ApiProblem(400, "Invalid request", "value is required");
+    let plaintext: Buffer;
+    try {
+      const serialized = JSON.stringify(body.value);
+      if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
+        throw new Error("invalid value");
+      const prohibited = scanDlp(serialized).filter(
+        (finding) => finding !== "prompt-injection",
       );
+      if (prohibited.length)
+        throw new ApiProblem(
+          400,
+          "Prohibited content",
+          `value contains prohibited ${prohibited.join(", ")}`,
+        );
+      plaintext = Buffer.from(serialized, "utf8");
+    } catch (error) {
+      if (error instanceof ApiProblem) throw error;
+      throw new ApiProblem(400, "Invalid request", "value is invalid");
+    }
     const sourceType = requiredString(body, "sourceType");
     if (
       !["manual", "document", "interview", "professional"].includes(sourceType)
@@ -202,10 +220,31 @@ export async function registerVaultRoutes(
         body.confidence > 1)
     )
       throw new ApiProblem(400, "Invalid request", "confidence is invalid");
+    const fieldKey = requiredString(body, "fieldKey");
+    const category = factCategory(fieldKey);
+    await dependencies.authorizeIdentity?.(identity, {
+      category,
+      action: "create",
+      purpose: "vault.fact.create",
+    });
+    let encrypted: {
+      id: string;
+      ciphertext: Uint8Array;
+      keyVersion: number;
+    };
+    try {
+      encrypted = await dependencies.encryptFactValue(identity, {
+        fieldKey,
+        plaintext,
+      });
+    } finally {
+      plaintext.fill(0);
+    }
     const candidate = {
-      fieldKey: requiredString(body, "fieldKey"),
-      ciphertext,
-      keyVersion: requiredPositiveInteger(body, "keyVersion"),
+      id: encrypted.id,
+      fieldKey,
+      ciphertext: encrypted.ciphertext,
+      keyVersion: encrypted.keyVersion,
       sourceType,
       sourceId: requiredUuid(body, "sourceId"),
       evidenceIds: (body.evidenceIds ?? []) as string[],
@@ -214,11 +253,6 @@ export async function registerVaultRoutes(
         : {}),
       sensitivity,
     };
-    await dependencies.authorizeIdentity?.(identity, {
-      category: factCategory(candidate.fieldKey),
-      action: "create",
-      purpose: "vault.fact.create",
-    });
     const reservation = await dependencies.repository.reserveIdempotency(
       identity,
       key,
@@ -457,5 +491,46 @@ export async function registerVaultRoutes(
     } finally {
       exportKey.fill(0);
     }
+  });
+
+  server.post("/v1/reports", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.createReport)
+      throw new ApiProblem(
+        503,
+        "Report unavailable",
+        "Report generation is not configured.",
+      );
+    for (const category of allRecordCategories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "read",
+        purpose: "vault.report.create",
+      });
+    const body = objectBody(request.body);
+    const kind = requiredString(body, "kind");
+    if (
+      kind !== "family-emergency-guide" &&
+      kind !== "executor-preparation-packet"
+    )
+      throw new ApiProblem(400, "Invalid request", "report kind is invalid");
+    const key = idempotencyKey(request);
+    const reservation = await dependencies.repository.reserveIdempotency(
+      identity,
+      key,
+      { kind },
+    );
+    if (reservation.replay)
+      return reply
+        .code(reservation.statusCode ?? 409)
+        .send(reservation.responseBody ?? { status: "processing" });
+    const report = await dependencies.createReport(identity, kind);
+    await dependencies.repository.completeIdempotency(
+      identity,
+      key,
+      201,
+      report,
+    );
+    return reply.code(201).send(report);
   });
 }

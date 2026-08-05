@@ -8,6 +8,7 @@ export interface TenantContext {
   actorId: string;
 }
 export interface CandidateFactWrite {
+  id: string;
   fieldKey: string;
   ciphertext: Uint8Array;
   keyVersion: number;
@@ -42,6 +43,35 @@ export type PrivacyRequestKind =
 export interface StartedPortableExport {
   export: { id: string; status: string; version: number };
   workflow: { id: string; status: string; version: number };
+}
+export interface PortableExportBuildInput {
+  exportId: string;
+  workflowId: string;
+  status: string;
+  createdAt: string;
+  wrappedExportKey: unknown;
+  encryptionKeyVersion: number;
+  snapshot: unknown;
+  documents: readonly {
+    id: string;
+    objectKey: string;
+    mediaType: string;
+    encryptionKeyVersion: number;
+  }[];
+}
+export interface EncryptedFactForReport {
+  id: string;
+  fieldKey: string;
+  ciphertext: Uint8Array;
+  keyVersion: number;
+  sourceType: string;
+  sourceId: string;
+  evidenceIds: string[];
+  confidence?: number;
+  sensitivity: string;
+  confirmedBy: string;
+  confirmedAt: string;
+  version: number;
 }
 
 export class VaultRepository {
@@ -80,7 +110,6 @@ export class VaultRepository {
     input: CandidateFactWrite,
   ): Promise<{ id: string; status: "candidate"; version: number }> {
     return this.withTenant(context, async (client) => {
-      const id = randomUUID();
       const result = await client.query<{
         id: string;
         status: "candidate";
@@ -88,7 +117,7 @@ export class VaultRepository {
       }>(
         "insert into facts(id, organization_id, household_id, field_key, typed_value_encrypted, key_version, status, source_type, source_id, evidence_ids, confidence, sensitivity) values ($1,$2,$3,$4,$5,$6,'candidate',$7,$8,$9,$10,$11) returning id,status,version",
         [
-          id,
+          input.id,
           context.organizationId,
           context.householdId,
           input.fieldKey,
@@ -140,6 +169,78 @@ export class VaultRepository {
       const row = result.rows[0];
       if (!row) throw new Error("fact unavailable");
       return row.field_key;
+    });
+  }
+
+  async listConfirmedFactsForReport(
+    context: TenantContext,
+  ): Promise<EncryptedFactForReport[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        field_key: string;
+        typed_value_encrypted: Buffer;
+        key_version: number;
+        source_type: string;
+        source_id: string;
+        evidence_ids: string[];
+        confidence: string | null;
+        sensitivity: string;
+        confirmed_by: string;
+        confirmed_at: Date;
+        version: number;
+      }>(
+        "select id,field_key,typed_value_encrypted,key_version,source_type,source_id,evidence_ids,confidence,sensitivity,confirmed_by,confirmed_at,version from facts where status='confirmed' order by field_key,id",
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        fieldKey: row.field_key,
+        ciphertext: new Uint8Array(row.typed_value_encrypted),
+        keyVersion: row.key_version,
+        sourceType: row.source_type,
+        sourceId: row.source_id,
+        evidenceIds: row.evidence_ids,
+        ...(row.confidence === null
+          ? {}
+          : { confidence: Number(row.confidence) }),
+        sensitivity: row.sensitivity,
+        confirmedBy: row.confirmed_by,
+        confirmedAt: row.confirmed_at.toISOString(),
+        version: row.version,
+      }));
+    });
+  }
+
+  async persistReport(
+    context: TenantContext,
+    input: {
+      id: string;
+      kind: string;
+      generatedAt: string;
+      claims: unknown;
+      sourceFactVersions: unknown;
+    },
+  ): Promise<{ id: string; kind: string; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        kind: string;
+        version: number;
+      }>(
+        "insert into reports(id,organization_id,household_id,kind,generated_at,claims,source_fact_versions) values ($1,$2,$3,$4,$5,$6,$7) returning id,kind,version",
+        [
+          input.id,
+          context.organizationId,
+          context.householdId,
+          input.kind,
+          input.generatedAt,
+          JSON.stringify(input.claims),
+          JSON.stringify(input.sourceFactVersions),
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("report was not persisted");
+      return row;
     });
   }
 
@@ -544,6 +645,107 @@ export class VaultRepository {
         ],
       );
       return response;
+    });
+  }
+
+  async getPortableExportBuildInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<PortableExportBuildInput> {
+    return this.withTenant(context, async (client) => {
+      const exportResult = await client.query<{
+        id: string;
+        workflow_id: string;
+        status: string;
+        created_at: Date;
+        wrapped_export_key: unknown;
+        encryption_key_version: number;
+      }>(
+        "select e.id,e.workflow_id,e.status,e.created_at,e.wrapped_export_key,e.encryption_key_version from exports e join workflow_runs w on w.id=e.workflow_id where e.workflow_id=$1 and w.subject_type='Export' and w.subject_id=e.id",
+        [workflowId],
+      );
+      const exportRecord = exportResult.rows[0];
+      if (!exportRecord) throw new Error("portable export is unavailable");
+      const snapshotResult = await client.query<{ snapshot: unknown }>(`
+        select jsonb_build_object(
+          'format','legacy-vault-household-snapshot/v1',
+          'people',coalesce((select jsonb_agg(to_jsonb(p)-'organization_id'-'household_id' order by p.id) from people p),'[]'::jsonb),
+          'memberships',coalesce((select jsonb_agg(to_jsonb(m)-'organization_id'-'household_id'-'auth_user_id' order by m.id) from memberships m),'[]'::jsonb),
+          'permissionGrants',coalesce((select jsonb_agg(to_jsonb(g)-'organization_id'-'household_id' order by g.id) from permission_grants g),'[]'::jsonb),
+          'facts',coalesce((select jsonb_agg(to_jsonb(f)-'organization_id'-'household_id' order by f.id) from facts f),'[]'::jsonb),
+          'consents',coalesce((select jsonb_agg(to_jsonb(c)-'organization_id'-'household_id' order by c.id) from consents c),'[]'::jsonb),
+          'emergencyAccess',coalesce((select jsonb_agg(to_jsonb(e)-'organization_id'-'household_id' order by e.id) from emergency_access_requests e),'[]'::jsonb),
+          'reports',coalesce((select jsonb_agg(to_jsonb(r)-'organization_id'-'household_id' order by r.id) from reports r),'[]'::jsonb),
+          'privacyRequests',coalesce((select jsonb_agg(to_jsonb(pr)-'organization_id'-'household_id' order by pr.id) from privacy_requests pr),'[]'::jsonb),
+          'subscription',coalesce((select jsonb_agg(to_jsonb(s)-'organization_id'-'household_id'-'provider_customer_id'-'provider_subscription_id' order by s.id) from subscriptions s),'[]'::jsonb)
+        ) as snapshot
+      `);
+      const documentResult = await client.query<{
+        id: string;
+        object_key: string;
+        media_type: string;
+        encryption_key_version: number;
+      }>(
+        "select id,object_key,media_type,encryption_key_version from documents where status='clean' order by id",
+      );
+      return {
+        exportId: exportRecord.id,
+        workflowId: exportRecord.workflow_id,
+        status: exportRecord.status,
+        createdAt: exportRecord.created_at.toISOString(),
+        wrappedExportKey: exportRecord.wrapped_export_key,
+        encryptionKeyVersion: exportRecord.encryption_key_version,
+        snapshot: snapshotResult.rows[0]?.snapshot ?? {},
+        documents: documentResult.rows.map((document) => ({
+          id: document.id,
+          objectKey: document.object_key,
+          mediaType: document.media_type,
+          encryptionKeyVersion: document.encryption_key_version,
+        })),
+      };
+    });
+  }
+
+  async completePortableExport(
+    context: TenantContext,
+    input: {
+      exportId: string;
+      workflowId: string;
+      objectKey: string;
+      archiveSha256: string;
+      signerPublicKey: string;
+      completedAt: string;
+    },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      const completed = await client.query(
+        "update exports set status='completed',object_key=$1,archive_sha256=$2,signer_public_key=$3,completed_at=$4,version=version+1 where id=$5 and workflow_id=$6 and status<>'completed'",
+        [
+          input.objectKey,
+          input.archiveSha256,
+          input.signerPublicKey,
+          input.completedAt,
+          input.exportId,
+          input.workflowId,
+        ],
+      );
+      if (completed.rowCount === 0) {
+        const existing = await client.query(
+          "select 1 from exports where id=$1 and workflow_id=$2 and status='completed' and object_key=$3 and archive_sha256=$4",
+          [
+            input.exportId,
+            input.workflowId,
+            input.objectKey,
+            input.archiveSha256,
+          ],
+        );
+        if (existing.rowCount !== 1)
+          throw new Error("portable export completion conflict");
+      }
+      await client.query(
+        "update workflow_runs set status='completed',completed_steps='[\"snapshot\",\"archive\",\"store\"]',next_step=null,version=version+1 where id=$1 and status<>'completed'",
+        [input.workflowId],
+      );
     });
   }
 

@@ -42,6 +42,18 @@ const server = buildServer({
       workflow: { id: randomUUID(), status: "pending", version: 1 },
     };
   },
+  encryptFactValue: async (_resolved, input) => ({
+    id: randomUUID(),
+    ciphertext: Buffer.from(
+      JSON.stringify({ algorithm: "test", value: input.plaintext.toString() }),
+    ),
+    keyVersion: 1,
+  }),
+  createReport: async (_resolved, kind) => ({
+    id: randomUUID(),
+    kind,
+    version: 1,
+  }),
 });
 
 beforeAll(async () => {
@@ -81,8 +93,7 @@ describe("vault API persistence", () => {
     const key = `create-${randomUUID()}`;
     const payload = {
       fieldKey: "insurance.carrier",
-      ciphertextBase64: Buffer.alloc(32, 7).toString("base64"),
-      keyVersion: 1,
+      value: { carrier: "Example Mutual" },
       sourceType: "manual",
       sourceId: randomUUID(),
       evidenceIds: [],
@@ -236,11 +247,10 @@ describe("vault API persistence", () => {
     });
   });
 
-  it("rejects invalid encrypted fact input before reserving its idempotency key", async () => {
+  it("rejects prohibited fact content before reserving its idempotency key", async () => {
     const key = `validation-${randomUUID()}`;
     const base = {
       fieldKey: "insurance.policy-number",
-      keyVersion: 1,
       sourceType: "manual",
       sourceId: randomUUID(),
       evidenceIds: [],
@@ -250,7 +260,7 @@ describe("vault API persistence", () => {
       method: "POST",
       url: "/v1/facts",
       headers: { "idempotency-key": key },
-      payload: { ...base, ciphertextBase64: "not base64%%%" },
+      payload: { ...base, value: "password: supersecret" },
     });
     expect(invalid.statusCode).toBe(400);
     const corrected = await server.inject({
@@ -259,7 +269,7 @@ describe("vault API persistence", () => {
       headers: { "idempotency-key": key },
       payload: {
         ...base,
-        ciphertextBase64: Buffer.alloc(32, 9).toString("base64"),
+        value: "Policy reference in locked drawer",
       },
     });
     expect(corrected.statusCode).toBe(201);
@@ -272,8 +282,7 @@ describe("vault API persistence", () => {
       headers: { "idempotency-key": `category-${randomUUID()}` },
       payload: {
         fieldKey: "unknown.secret",
-        ciphertextBase64: Buffer.alloc(32, 5).toString("base64"),
-        keyVersion: 1,
+        value: "not stored",
         sourceType: "manual",
         sourceId: randomUUID(),
         evidenceIds: [],
@@ -308,5 +317,33 @@ describe("vault API persistence", () => {
     );
     expect(exportScopes).toHaveLength(13);
     expect(exportScopes.every((scope) => scope.action === "export")).toBe(true);
+  });
+
+  it("authorizes and idempotently persists a canonical report request", async () => {
+    const key = `report-${randomUUID()}`;
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/reports",
+      headers: { "idempotency-key": key },
+      payload: { kind: "family-emergency-guide" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      kind: "family-emergency-guide",
+      version: 1,
+    });
+    const replay = await server.inject({
+      method: "POST",
+      url: "/v1/reports",
+      headers: { "idempotency-key": key },
+      payload: { kind: "family-emergency-guide" },
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json()).toEqual(created.json());
+    expect(
+      authorizationScopes.filter(
+        (scope) => scope.purpose === "vault.report.create",
+      ),
+    ).toHaveLength(26);
   });
 });

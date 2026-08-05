@@ -8,9 +8,16 @@ import {
   resolveRequestIdentity,
 } from "@legacy/auth";
 import type { Environment } from "@legacy/contracts/environment";
-import { encryptEnvelope } from "@legacy/crypto";
+import {
+  decryptEnvelope,
+  encryptEnvelope,
+  PostgresHouseholdKeyStore,
+  type EncryptedEnvelope,
+} from "@legacy/crypto";
 import { VaultRepository } from "@legacy/database/repository";
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
+import { generateReport } from "@legacy/reports";
+import type { CandidateFact } from "@legacy/domain";
 import {
   LocalSmtpCaptureAdapter,
   ResendEmailAdapter,
@@ -56,6 +63,10 @@ export function createApplicationRuntime(environment: Environment): {
   if (applicationKek.byteLength !== 32)
     throw new Error("application encryption KEK is invalid");
   const workflowQueue = createWorkflowQueue(environment.REDIS_URL);
+  const householdKeyStore = new PostgresHouseholdKeyStore(
+    environment.DATABASE_URL,
+    applicationKek,
+  );
   const email = environment.LOCAL_ENGINEERING_MODE
     ? new LocalSmtpCaptureAdapter({
         host: "127.0.0.1",
@@ -179,6 +190,79 @@ export function createApplicationRuntime(environment: Environment): {
         });
         return started;
       },
+      encryptFactValue: async (identity, input) => {
+        const id = randomUUID();
+        const key = await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          const envelope = encryptEnvelope(input.plaintext, key.plaintextKey, {
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            recordId: id,
+            purpose: `fact-value:${input.fieldKey}`,
+            keyVersion: key.keyVersion,
+          });
+          return {
+            id,
+            ciphertext: Buffer.from(JSON.stringify(envelope), "utf8"),
+            keyVersion: key.keyVersion,
+          };
+        } finally {
+          key.plaintextKey.fill(0);
+        }
+      },
+      createReport: async (identity, kind) => {
+        const encryptedFacts =
+          await repository.listConfirmedFactsForReport(identity);
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          const facts: CandidateFact[] = encryptedFacts.map((fact) => {
+            const envelope = JSON.parse(
+              Buffer.from(fact.ciphertext).toString("utf8"),
+            ) as EncryptedEnvelope;
+            const opened = decryptEnvelope(
+              envelope,
+              householdKey.plaintextKey,
+              {
+                organizationId: identity.organizationId,
+                householdId: identity.householdId,
+                recordId: fact.id,
+                purpose: `fact-value:${fact.fieldKey}`,
+                keyVersion: fact.keyVersion,
+              },
+            );
+            return {
+              id: fact.id,
+              organizationId: identity.organizationId,
+              householdId: identity.householdId,
+              fieldKey: fact.fieldKey,
+              typedValue: JSON.parse(Buffer.from(opened).toString("utf8")),
+              status: "confirmed",
+              sourceType: fact.sourceType as CandidateFact["sourceType"],
+              sourceId: fact.sourceId,
+              evidenceIds: fact.evidenceIds,
+              ...(fact.confidence === undefined
+                ? {}
+                : { confidence: fact.confidence }),
+              sensitivity: fact.sensitivity as CandidateFact["sensitivity"],
+              confirmedBy: fact.confirmedBy,
+              confirmedAt: fact.confirmedAt,
+              version: fact.version,
+            };
+          });
+          const report = generateReport({
+            id: randomUUID(),
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            kind,
+            generatedAt: new Date().toISOString(),
+            facts,
+          });
+          return repository.persistReport(identity, report);
+        } finally {
+          householdKey.plaintextKey.fill(0);
+        }
+      },
     },
     async close() {
       await Promise.all([
@@ -187,6 +271,7 @@ export function createApplicationRuntime(environment: Environment): {
         authRuntime.close(),
         auditStore.close(),
         workflowQueue.close(),
+        householdKeyStore.close(),
       ]);
     },
   };

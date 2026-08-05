@@ -28,6 +28,15 @@ export const households = pgTable("households", {
   lastReviewedAt: timestamp("last_reviewed_at", { withTimezone: true }),
   ...versioned,
 });
+export const householdKeys = pgTable("household_keys", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  keyVersion: integer("key_version").notNull(),
+  wrappedKey: jsonb("wrapped_key").notNull(),
+  status: text("status").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+});
 export const people = pgTable("people", {
   id: uuid("id").primaryKey(),
   ...tenant,

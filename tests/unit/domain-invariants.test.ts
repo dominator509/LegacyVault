@@ -124,6 +124,19 @@ describe("domain invariants", () => {
     expect(claim).toMatchObject({ status: "missing", renderedValue: "" });
   });
 
+  it("renders a confirmed structured fact without object coercion", () => {
+    const [claim] = createReportClaims([
+      {
+        ...candidate,
+        status: "confirmed",
+        typedValue: { carrier: "Example Mutual" },
+        confirmedBy: "person-1",
+        confirmedAt: "2026-08-05T00:00:00Z",
+      },
+    ]);
+    expect(claim?.renderedValue).toBe('{"carrier":"Example Mutual"}');
+  });
+
   it("requires evidence and source version for confirmed report claims", () => {
     const report: Report = {
       ...tenant,

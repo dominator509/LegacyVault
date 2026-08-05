@@ -30,7 +30,12 @@ export function createReportClaims(
     factId: fact.id,
     evidenceIds: fact.evidenceIds,
     fieldKey: fact.fieldKey,
-    renderedValue: fact.status === "confirmed" ? String(fact.typedValue) : "",
+    renderedValue:
+      fact.status === "confirmed"
+        ? typeof fact.typedValue === "string"
+          ? fact.typedValue
+          : JSON.stringify(fact.typedValue)
+        : "",
     status:
       fact.status === "confirmed"
         ? "confirmed"

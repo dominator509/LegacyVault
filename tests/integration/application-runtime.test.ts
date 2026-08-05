@@ -6,6 +6,11 @@ import { buildServer } from "../../apps/api/src/server.js";
 import { runMigrations } from "../../packages/database/src/migrate.js";
 import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { AuthorizationDeniedError } from "../../packages/auth/src/index.js";
+import {
+  decryptEnvelope,
+  PostgresHouseholdKeyStore,
+  type EncryptedEnvelope,
+} from "../../packages/crypto/src/index.js";
 import { readLocalEnvironment } from "../helpers/local-environment.js";
 
 interface MailpitSummary {
@@ -192,6 +197,80 @@ describe("composed application runtime", () => {
       expect(
         JSON.stringify(persisted.rows[0]?.wrapped_export_key),
       ).not.toContain(exportKey.toString("base64"));
+
+      const plaintext = Buffer.from('{"carrier":"Runtime Mutual"}');
+      const encrypted = await runtime.dependencies.encryptFactValue?.(
+        identity,
+        { fieldKey: "insurance.carrier", plaintext },
+      );
+      expect(encrypted).toBeDefined();
+      const evidenceId = randomUUID();
+      await runtime.dependencies.repository.createCandidateFact(identity, {
+        id: encrypted?.id ?? "",
+        fieldKey: "insurance.carrier",
+        ciphertext: encrypted?.ciphertext ?? new Uint8Array(),
+        keyVersion: encrypted?.keyVersion ?? 0,
+        sourceType: "manual",
+        sourceId: randomUUID(),
+        evidenceIds: [evidenceId],
+        sensitivity: "sensitive",
+      });
+      expect(
+        Buffer.from(encrypted?.ciphertext ?? []).toString("utf8"),
+      ).not.toContain("Runtime Mutual");
+      const keyStore = new PostgresHouseholdKeyStore(
+        environment.DATABASE_URL ?? "",
+        Buffer.from(environment.APP_ENCRYPTION_KEK ?? "", "base64"),
+      );
+      try {
+        const householdKey = await keyStore.getOrCreateActiveKey(identity);
+        const envelope = JSON.parse(
+          Buffer.from(encrypted?.ciphertext ?? []).toString("utf8"),
+        ) as EncryptedEnvelope;
+        const opened = decryptEnvelope(envelope, householdKey.plaintextKey, {
+          organizationId,
+          householdId,
+          recordId: encrypted?.id ?? "",
+          purpose: "fact-value:insurance.carrier",
+          keyVersion: encrypted?.keyVersion ?? 0,
+        });
+        expect(Buffer.from(opened).toString("utf8")).toBe(
+          '{"carrier":"Runtime Mutual"}',
+        );
+        householdKey.plaintextKey.fill(0);
+      } finally {
+        await keyStore.close();
+      }
+      plaintext.fill(0);
+      await runtime.dependencies.repository.confirmFact(
+        identity,
+        encrypted?.id ?? "",
+        1,
+        new Date().toISOString(),
+      );
+      const report = await runtime.dependencies.createReport?.(
+        identity,
+        "family-emergency-guide",
+      );
+      expect(report).toMatchObject({
+        kind: "family-emergency-guide",
+        version: 1,
+      });
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [organizationId, householdId],
+      );
+      const reportRow = await client.query<{
+        claims: { factId: string; evidenceIds: string[] }[];
+      }>("select claims from reports where id=$1", [report?.id]);
+      await client.query("commit");
+      expect(reportRow.rows[0]?.claims).toEqual([
+        expect.objectContaining({
+          factId: encrypted?.id,
+          evidenceIds: [evidenceId],
+        }),
+      ]);
     } finally {
       await client.end();
     }

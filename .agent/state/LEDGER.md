@@ -107,3 +107,12 @@
 2026-08-05T22:36:00Z | codex | EP-004 | SIG | lint_TS2307_worker_package_missing_export_and_TS2741_handler_map_missing_privacy_export_integration_import_failure
 2026-08-05T22:36:00Z | codex | EP-004 | HYPOTHESIS | expose_existing_worker_source_boundary_and_extend_exhaustive_real_queue_handler_map
 2026-08-05T22:38:25Z | codex | EP-004 | HEARTBEAT | signed_encrypted_portable_export_wrapped_key_idempotent_RLS_workflow_Redis_queue_unit_35_integration_33_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T22:45:30Z | codex | EP-004 | SIG | format_check_exit_1_runtime_encryption_proof_style_only_lint_integration_34_security_ok
+2026-08-05T22:45:30Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_integration_gates
+2026-08-05T22:50:57Z | codex | EP-004 | SAFETY_DIAGNOSTIC | export_integration_execution_with_unconstrained_R2_ENDPOINT_rejected_before_command_start
+2026-08-05T22:50:57Z | codex | EP-004 | HYPOTHESIS | enforce_loopback_endpoint_in_test_before_any_object_store_network_operation
+2026-08-05T22:51:40Z | codex | EP-004 | SIG | format_check_exit_1_export_worker_and_loopback_test_style_only_install_audit_lint_ok
+2026-08-05T22:51:40Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-05T22:55:51Z | codex | EP-004 | SIG | format_check_exit_1_report_runtime_style_only_install_audit_lint_integration_36_ok
+2026-08-05T22:55:51Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_security_gates
+2026-08-05T22:58:41Z | codex | EP-004 | HEARTBEAT | household_DEK_RLS_server_fact_encryption_secret_block_export_worker_MinIO_rewrap_and_confirmed_report_unit_36_integration_36_e2e_2_build_format_security_audit_smoke_ok

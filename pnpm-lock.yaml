@@ -32,6 +32,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@legacy/ai-gateway':
+        specifier: workspace:*
+        version: link:../../packages/ai-gateway
       '@legacy/audit':
         specifier: workspace:*
         version: link:../../packages/audit
@@ -50,6 +53,9 @@ importers:
       '@legacy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@legacy/reports':
+        specifier: workspace:*
+        version: link:../../packages/reports
       '@legacy/worker':
         specifier: workspace:*
         version: link:../worker
@@ -97,6 +103,15 @@ importers:
       '@legacy/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@legacy/crypto':
+        specifier: workspace:*
+        version: link:../../packages/crypto
+      '@legacy/database':
+        specifier: workspace:*
+        version: link:../../packages/database
+      '@legacy/reports':
+        specifier: workspace:*
+        version: link:../../packages/reports
       bullmq:
         specifier: 6.0.8
         version: 6.0.8(ioredis@6.0.0)(pg@8.22.0)
@@ -176,7 +191,14 @@ importers:
         version: 7.0.2
 
   packages/crypto:
+    dependencies:
+      pg:
+        specifier: 8.22.0
+        version: 8.22.0
     devDependencies:
+      '@types/pg':
+        specifier: 8.20.4
+        version: 8.20.4
       typescript:
         specifier: 7.0.2
         version: 7.0.2
