@@ -1,18 +1,13 @@
 {
-  "name": "@legacy/contracts",
+  "name": "@legacy/domain",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "exports": {
-    "./environment": "./src/environment.ts",
-    "./http": "./src/http.ts"
+    ".": "./src/index.ts"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json"
-  },
-  "dependencies": {
-    "@legacy/domain": "workspace:*",
-    "zod": "4.4.3"
   },
   "devDependencies": {
     "typescript": "7.0.2"

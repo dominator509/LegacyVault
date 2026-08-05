@@ -18,5 +18,6 @@
 | ADR-014 | Make database and Redis probes protocol-real and shell-portable | The database probe passed in login Git Bash but failed from preflight because `psql` was not on the non-login path; the Redis probe incorrectly targeted an undeclared HTTP URL and could not validate `REDIS_URL` | Accepted |
 | ADR-015 | Use GNU `timeout` only when positively identified and bound each local probe internally | Git Bash resolved `timeout` to Windows `timeout.exe`, which returned exit 1 for POSIX syntax and made every credential look invalid | Accepted |
 | ADR-016 | Format implementation artifacts but exclude immutable blueprint prose and generated lockfiles | The first format check reported 60 files, predominantly L1-L4 control documents that must not be mechanically rewritten | Accepted |
+| ADR-017 | Permit one explicit lock refresh after reviewed exact manifest changes, followed by frozen install and audit | Workspace packages and approved dependencies added by later graph nodes must update the lockfile without making ordinary installs mutable | Accepted |
 
 Add a decision before introducing a new canonical name, dependency, provider promise, data category, or exception. Use `.agent/templates/adr-template.md`.

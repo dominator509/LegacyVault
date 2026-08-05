@@ -32,3 +32,7 @@
 2026-08-05T18:49:26Z | codex | EP-001 | CONTINUATION_PASS | unit_3_integration_2_e2e_2_smoke_1_build_format_security_audit_reality_ok
 2026-08-05T18:49:26Z | codex | EP-001 | SIG | live_fire_exit_1_no_outcome_tests_yet
 2026-08-05T18:49:26Z | codex | EP-001 | LEASE_RELEASE | M2_and_NODE_DONE_withheld_external_preflight_and_product_outcomes_pending
+2026-08-05T18:51:16Z | codex | EP-002 | LEASE | explicit-implementation-continuation-ADR-009
+2026-08-05T18:59:38Z | codex | EP-002 | SIG | lint_TS2375_exact_optional_nextStep
+2026-08-05T18:59:38Z | codex | EP-002 | HYPOTHESIS | omit_completed_optional_property_instead_of_assigning_undefined
+2026-08-05T19:01:27Z | codex | EP-002 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok

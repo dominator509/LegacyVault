@@ -61,14 +61,14 @@ The verify sentinel is observed in this session, changed paths match this plan, 
 Re-enter from the first unchecked milestone after verifying the previous checkpoint. Use green tags and the rollback ladder. Never cross a completed node tag.
 
 # 11. Progress
-- [ ] M1 Implement bounded scope
+- [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- Exact optional property semantics require completed workflows to omit `nextStep`, not assign `undefined`.
 
 # 13. Decision Log
-- None recorded.
+- ADR-017 defines reviewed lockfile refreshes for graph-node workspace changes.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.

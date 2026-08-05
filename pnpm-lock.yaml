@@ -89,9 +89,18 @@ importers:
 
   packages/contracts:
     dependencies:
+      '@legacy/domain':
+        specifier: workspace:*
+        version: link:../domain
       zod:
         specifier: 4.4.3
         version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  packages/domain:
     devDependencies:
       typescript:
         specifier: 7.0.2
