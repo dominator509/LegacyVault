@@ -27,6 +27,16 @@ export interface PersistedWorkflow {
   version: number;
 }
 
+export interface NormalizedBillingEvent {
+  externalEventId: string;
+  eventType: string;
+  providerCreatedAt: string;
+  providerCustomerId: string;
+  providerSubscriptionId: string;
+  status: string;
+  plan: string;
+}
+
 export class VaultRepository {
   readonly #pool: pg.Pool;
   constructor(databaseUrl: string) {
@@ -238,6 +248,50 @@ export class VaultRepository {
         "update workflow_runs set status='failed',last_error_class=$1,version=version+1 where id=$2 and status<>'completed'",
         [errorClass.slice(0, 120), workflowId],
       );
+    });
+  }
+
+  async processBillingEvent(
+    context: TenantContext,
+    event: NormalizedBillingEvent,
+  ): Promise<{ outcome: "applied" | "duplicate" | "stale" }> {
+    return this.withTenant(context, async (client) => {
+      const inserted = await client.query(
+        "insert into billing_events(id,organization_id,household_id,external_event_id,event_type,provider_created_at,payload) values ($1,$2,$3,$4,$5,$6,$7) on conflict (external_event_id) do nothing",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          event.externalEventId,
+          event.eventType,
+          event.providerCreatedAt,
+          JSON.stringify({
+            providerCustomerId: event.providerCustomerId,
+            providerSubscriptionId: event.providerSubscriptionId,
+            status: event.status,
+            plan: event.plan,
+          }),
+        ],
+      );
+      if (inserted.rowCount === 0) return { outcome: "duplicate" };
+      const subscription = await client.query(
+        "insert into subscriptions(id,organization_id,household_id,status,plan,provider_customer_id,provider_subscription_id,provider_updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (organization_id,household_id) do update set status=excluded.status,plan=excluded.plan,provider_customer_id=excluded.provider_customer_id,provider_subscription_id=excluded.provider_subscription_id,provider_updated_at=excluded.provider_updated_at,version=subscriptions.version+1 where subscriptions.provider_updated_at is null or subscriptions.provider_updated_at <= excluded.provider_updated_at returning id",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          event.status,
+          event.plan,
+          event.providerCustomerId,
+          event.providerSubscriptionId,
+          event.providerCreatedAt,
+        ],
+      );
+      await client.query(
+        "update billing_events set processed_at=now() where external_event_id=$1",
+        [event.externalEventId],
+      );
+      return { outcome: subscription.rowCount === 1 ? "applied" : "stale" };
     });
   }
 

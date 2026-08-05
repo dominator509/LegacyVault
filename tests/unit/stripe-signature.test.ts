@@ -22,10 +22,17 @@ describe("Stripe webhook verification", () => {
       timeoutMs: 1000,
     });
     expect(
-      adapter.verifyWebhook(payload, `t=1000,v1=${signature}`, 1000).id,
+      adapter.verifyWebhook(
+        payload,
+        `t=1000,v1=${"0".repeat(64)},v1=${signature}`,
+        1000,
+      ).id,
     ).toBe("evt_1");
     expect(() =>
       adapter.verifyWebhook(payload, `t=1000,v1=${signature}`, 1400),
+    ).toThrow(/timestamp/u);
+    expect(() =>
+      adapter.verifyWebhook(payload, "t=1000,v1=not-hex", 1000),
     ).toThrow(/timestamp/u);
   });
 });

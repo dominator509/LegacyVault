@@ -63,3 +63,8 @@
 2026-08-05T20:16:02Z | codex | EP-004 | SIG | ocrmypdf_alpine_17.8.1_pull_exit_1_manifest_not_found
 2026-08-05T20:16:02Z | codex | EP-004 | HYPOTHESIS | official_release_uses_v_prefix_on_primary_image_retry_documented_jbarlow83_ocrmypdf_v17.8.1
 2026-08-05T20:34:30Z | codex | EP-004 | HEARTBEAT | isolated_OCR_persisted_workflow_AI_retry_metrics_unit_24_integration_15_build_security_audit_reality_ok
+2026-08-05T20:38:57Z | codex | EP-004 | SIG | prettier_explicit_SQL_exit_2_no_parser_inferred_later_commands_masked_composite_exit
+2026-08-05T20:38:57Z | codex | EP-004 | HYPOTHESIS | repository_formatter_has_no_SQL_plugin_keep_migrations_outside_prettier_scope_and_use_diff_check
+2026-08-05T20:41:56Z | codex | EP-004 | SIG | billing_webhook_test_exit_1_503_provider_customer_unique_collision_across_runs
+2026-08-05T20:41:56Z | codex | EP-004 | HYPOTHESIS | test_reused_fixed_Stripe_identifiers_in_persistent_test_database_generate_run_scoped_provider_ids
+2026-08-05T20:45:50Z | codex | EP-004 | HEARTBEAT | Stripe_checkout_signed_webhook_replay_ordering_unit_24_integration_18_build_security_audit_reality_ok

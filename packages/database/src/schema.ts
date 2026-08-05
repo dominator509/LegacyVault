@@ -165,6 +165,7 @@ export const subscriptions = pgTable("subscriptions", {
   plan: text("plan").notNull(),
   providerCustomerId: text("provider_customer_id"),
   providerSubscriptionId: text("provider_subscription_id"),
+  providerUpdatedAt: timestamp("provider_updated_at", { withTimezone: true }),
   ...versioned,
 });
 export const auditEvents = pgTable(

@@ -2,10 +2,13 @@ import Fastify, { LogController } from "fastify";
 import { loadEnvironment } from "@legacy/contracts/environment";
 import type { VaultRepository } from "@legacy/database/repository";
 import { registerVaultRoutes, type IdentityResolver } from "./routes/vault.js";
+import { registerBillingRoutes } from "./routes/billing.js";
+import type { StripeAdapter } from "./adapters/stripe.js";
 
 export interface ServerDependencies {
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
+  stripe?: StripeAdapter;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -42,6 +45,13 @@ export function buildServer(dependencies?: ServerDependencies) {
   if (dependencies)
     server.register(async (instance) =>
       registerVaultRoutes(instance, dependencies),
+    );
+  if (dependencies?.stripe)
+    server.register(async (instance) =>
+      registerBillingRoutes(instance, {
+        repository: dependencies.repository,
+        stripe: dependencies.stripe!,
+      }),
     );
   return server;
 }

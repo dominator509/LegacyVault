@@ -12,6 +12,21 @@ export interface CheckoutRequest {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey: string;
+  organizationId: string;
+  householdId: string;
+  plan: "essential";
+}
+
+export interface NormalizedStripeSubscriptionEvent {
+  organizationId: string;
+  householdId: string;
+  externalEventId: string;
+  eventType: string;
+  providerCreatedAt: string;
+  providerCustomerId: string;
+  providerSubscriptionId: string;
+  status: "trialing" | "active" | "past_due" | "canceled" | "unpaid" | "paused";
+  plan: "essential";
 }
 
 export class StripeAdapter {
@@ -39,6 +54,10 @@ export class StripeAdapter {
       cancel_url: request.cancelUrl,
       "line_items[0][price]": this.config.essentialPriceId,
       "line_items[0][quantity]": "1",
+      "subscription_data[metadata][legacy_organization_id]":
+        request.organizationId,
+      "subscription_data[metadata][legacy_household_id]": request.householdId,
+      "subscription_data[metadata][legacy_plan]": request.plan,
     });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
@@ -76,16 +95,18 @@ export class StripeAdapter {
   ): { id: string; type: string; created: number; data: unknown } {
     if (!this.config.webhookSecret)
       throw new Error("Stripe webhook is not configured");
-    const entries = Object.fromEntries(
-      signatureHeader
-        .split(",")
-        .map((part) => part.split("=", 2) as [string, string]),
-    );
-    const timestamp = Number(entries.t);
-    const signature = entries.v1;
+    const entries = signatureHeader
+      .split(",")
+      .map((part) => part.split("=", 2));
+    const timestamp = Number(entries.find(([key]) => key === "t")?.[1]);
+    const signatures = entries
+      .filter(
+        ([key, value]) => key === "v1" && /^[0-9a-f]{64}$/iu.test(value ?? ""),
+      )
+      .map(([, value]) => value as string);
     if (
       !Number.isSafeInteger(timestamp) ||
-      !signature ||
+      signatures.length === 0 ||
       Math.abs(nowSeconds - timestamp) > 300
     )
       throw new Error("Stripe webhook signature timestamp invalid");
@@ -94,10 +115,12 @@ export class StripeAdapter {
       .update(".")
       .update(payload)
       .digest("hex");
-    const left = Buffer.from(signature, "hex");
     const right = Buffer.from(expected, "hex");
-    if (left.length !== right.length || !timingSafeEqual(left, right))
-      throw new Error("Stripe webhook signature invalid");
+    const valid = signatures.some((signature) => {
+      const left = Buffer.from(signature, "hex");
+      return left.length === right.length && timingSafeEqual(left, right);
+    });
+    if (!valid) throw new Error("Stripe webhook signature invalid");
     const event = JSON.parse(Buffer.from(payload).toString("utf8")) as {
       id?: string;
       type?: string;
@@ -111,6 +134,73 @@ export class StripeAdapter {
       type: event.type,
       created: event.created,
       data: event.data,
+    };
+  }
+
+  normalizeSubscriptionEvent(event: {
+    id: string;
+    type: string;
+    created: number;
+    data: unknown;
+  }): NormalizedStripeSubscriptionEvent | undefined {
+    if (
+      ![
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+      ].includes(event.type)
+    )
+      return undefined;
+    if (!event.data || typeof event.data !== "object")
+      throw new Error("Stripe subscription event data invalid");
+    const data = event.data as { object?: unknown };
+    if (!data.object || typeof data.object !== "object")
+      throw new Error("Stripe subscription object invalid");
+    const object = data.object as Record<string, unknown>;
+    const metadata =
+      object.metadata && typeof object.metadata === "object"
+        ? (object.metadata as Record<string, unknown>)
+        : {};
+    const organizationId = metadata.legacy_organization_id;
+    const householdId = metadata.legacy_household_id;
+    const plan = metadata.legacy_plan;
+    const subscriptionId = object.id;
+    const customerId = object.customer;
+    const rawStatus =
+      event.type === "customer.subscription.deleted"
+        ? "canceled"
+        : object.status;
+    const allowedStatuses = [
+      "trialing",
+      "active",
+      "past_due",
+      "canceled",
+      "unpaid",
+      "paused",
+    ] as const;
+    const uuid =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+    if (
+      typeof organizationId !== "string" ||
+      !uuid.test(organizationId) ||
+      typeof householdId !== "string" ||
+      !uuid.test(householdId) ||
+      plan !== "essential" ||
+      typeof subscriptionId !== "string" ||
+      typeof customerId !== "string" ||
+      !allowedStatuses.includes(rawStatus as (typeof allowedStatuses)[number])
+    )
+      throw new Error("Stripe subscription metadata invalid");
+    return {
+      organizationId,
+      householdId,
+      externalEventId: event.id,
+      eventType: event.type,
+      providerCreatedAt: new Date(event.created * 1_000).toISOString(),
+      providerCustomerId: customerId,
+      providerSubscriptionId: subscriptionId,
+      status: rawStatus as NormalizedStripeSubscriptionEvent["status"],
+      plan,
     };
   }
 }
