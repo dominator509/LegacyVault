@@ -189,3 +189,51 @@ export const auditEvents = pgTable(
     uniqueIndex("audit_event_hash_unique").on(table.eventHash),
   ],
 );
+
+export const idempotencyRecords = pgTable("idempotency_records", {
+  ...tenant,
+  idempotencyKey: text("idempotency_key").notNull(),
+  requestHash: text("request_hash").notNull(),
+  statusCode: integer("status_code"),
+  responseBody: jsonb("response_body"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+});
+
+export const billingEvents = pgTable(
+  "billing_events",
+  {
+    id: uuid("id").primaryKey(),
+    ...tenant,
+    externalEventId: text("external_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    providerCreatedAt: timestamp("provider_created_at", {
+      withTimezone: true,
+    }).notNull(),
+    payload: jsonb("payload").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+    processingErrorClass: text("processing_error_class"),
+  },
+  (table) => [
+    uniqueIndex("billing_external_event_unique").on(table.externalEventId),
+  ],
+);
+
+export const deletionProcessorRequests = pgTable(
+  "deletion_processor_requests",
+  {
+    id: uuid("id").primaryKey(),
+    ...tenant,
+    workflowId: uuid("workflow_id").notNull(),
+    processor: text("processor").notNull(),
+    externalRequestId: text("external_request_id"),
+    status: text("status").notNull(),
+    requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("deletion_workflow_processor_unique").on(
+      table.workflowId,
+      table.processor,
+    ),
+  ],
+);

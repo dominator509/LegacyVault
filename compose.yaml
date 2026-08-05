@@ -82,8 +82,23 @@ services:
       retries: 30
     restart: unless-stopped
 
+  clamav:
+    image: clamav/clamav:1.4.5-debian13-slim@sha256:c730bead5fe766dc0edbac5e389b71fc1403a5d3a35c6af9397ad79a52fdc27a
+    ports:
+      - "127.0.0.1:13310:3310"
+    volumes:
+      - clamav-data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+
 volumes:
   postgres-data:
   valkey-data:
   minio-data:
   mailpit-data:
+  clamav-data:

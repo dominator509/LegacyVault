@@ -55,3 +55,8 @@
 2026-08-05T19:49:48Z | codex | EP-004 | SIG | lint_TS18046_Fastify_error_unknown
 2026-08-05T19:49:49Z | codex | EP-004 | HYPOTHESIS | narrow_unknown_error_before_safe_mapping
 2026-08-05T19:56:46Z | codex | EP-004 | HEARTBEAT | postgres_API_idempotency_confirmation_privacy_workflow_SMTP_capture_unit_19_integration_11_build_security_audit_reality_ok
+2026-08-05T20:07:19Z | codex | EP-004 | SIG | clamav_pull_exit_124_command_timeout
+2026-08-05T20:07:19Z | codex | EP-004 | HYPOTHESIS | official_image_download_exceeds_two_minute_command_bound_retry_with_bounded_ten_minute_window
+2026-08-05T20:11:06Z | codex | EP-004 | SIG | document_quarantine_test_expected_EICAR_detection_after_PDF_prefix_but_clamd_returned_clean
+2026-08-05T20:11:07Z | codex | EP-004 | HYPOTHESIS | EICAR_signature_requires_canonical_test_file_move_infected_state_transition_to_unit_boundary_keep_exact_real_scanner_proof
+2026-08-05T20:15:26Z | codex | EP-004 | HEARTBEAT | document_quarantine_MIME_size_real_ClamAV_EICAR_MinIO_unit_22_integration_13_build_security_audit_reality_ok
