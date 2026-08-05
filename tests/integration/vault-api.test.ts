@@ -103,4 +103,68 @@ describe("vault API persistence", () => {
       version: 2,
     });
   });
+
+  it("atomically persists and replays a canonical privacy request and deletion workflow", async () => {
+    const key = `privacy-${randomUUID()}`;
+    const payload = { personId: randomUUID(), kind: "deletion" };
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/privacy-requests",
+      headers: { "idempotency-key": key },
+      payload,
+    });
+    expect(created.statusCode).toBe(202);
+    expect(created.json()).toMatchObject({
+      privacyRequest: {
+        kind: "deletion",
+        status: "identity-verification",
+        version: 1,
+      },
+      workflow: { status: "pending", version: 1 },
+    });
+    const replay = await server.inject({
+      method: "POST",
+      url: "/v1/privacy-requests",
+      headers: { "idempotency-key": key },
+      payload,
+    });
+    expect(replay.statusCode).toBe(202);
+    expect(replay.json()).toEqual(created.json());
+    const mismatched = await server.inject({
+      method: "POST",
+      url: "/v1/privacy-requests",
+      headers: { "idempotency-key": key },
+      payload: { personId: payload.personId, kind: "export" },
+    });
+    expect(mismatched.statusCode).toBe(409);
+  });
+
+  it("rejects invalid encrypted fact input before reserving its idempotency key", async () => {
+    const key = `validation-${randomUUID()}`;
+    const base = {
+      fieldKey: "insurance.policy-number",
+      keyVersion: 1,
+      sourceType: "manual",
+      sourceId: randomUUID(),
+      evidenceIds: [],
+      sensitivity: "sensitive",
+    };
+    const invalid = await server.inject({
+      method: "POST",
+      url: "/v1/facts",
+      headers: { "idempotency-key": key },
+      payload: { ...base, ciphertextBase64: "not base64%%%" },
+    });
+    expect(invalid.statusCode).toBe(400);
+    const corrected = await server.inject({
+      method: "POST",
+      url: "/v1/facts",
+      headers: { "idempotency-key": key },
+      payload: {
+        ...base,
+        ciphertextBase64: Buffer.alloc(32, 9).toString("base64"),
+      },
+    });
+    expect(corrected.statusCode).toBe(201);
+  });
 });

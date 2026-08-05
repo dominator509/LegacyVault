@@ -36,6 +36,8 @@ export interface NormalizedBillingEvent {
   status: string;
   plan: string;
 }
+export type PrivacyRequestKind =
+  "access" | "correction" | "export" | "deletion" | "appeal";
 
 export class VaultRepository {
   readonly #pool: pg.Pool;
@@ -292,6 +294,117 @@ export class VaultRepository {
         [event.externalEventId],
       );
       return { outcome: subscription.rowCount === 1 ? "applied" : "stale" };
+    });
+  }
+
+  async startPrivacyRequest(
+    context: TenantContext,
+    input: {
+      personId: string;
+      kind: PrivacyRequestKind;
+      idempotencyKey: string;
+      requestedAt: string;
+    },
+  ): Promise<{
+    privacyRequest: {
+      id: string;
+      kind: PrivacyRequestKind;
+      status: string;
+      version: number;
+    };
+    workflow?: { id: string; status: string; version: number };
+  }> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(JSON.stringify({ personId: input.personId, kind: input.kind }))
+        .digest("hex");
+      const inserted = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (inserted.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("idempotency key reused with different request");
+        if (!row.response_body)
+          throw new Error("privacy request is still processing");
+        return row.response_body as {
+          privacyRequest: {
+            id: string;
+            kind: PrivacyRequestKind;
+            status: string;
+            version: number;
+          };
+          workflow?: { id: string; status: string; version: number };
+        };
+      }
+
+      const privacyId = randomUUID();
+      const privacyResult = await client.query<{
+        id: string;
+        kind: PrivacyRequestKind;
+        status: string;
+        version: number;
+      }>(
+        "insert into privacy_requests(id,organization_id,household_id,person_id,kind,status,requested_at) values ($1,$2,$3,$4,$5,'identity-verification',$6) returning id,kind,status,version",
+        [
+          privacyId,
+          context.organizationId,
+          context.householdId,
+          input.personId,
+          input.kind,
+          input.requestedAt,
+        ],
+      );
+      const privacyRequest = privacyResult.rows[0];
+      if (!privacyRequest)
+        throw new Error("privacy request insert returned no row");
+      let workflow: { id: string; status: string; version: number } | undefined;
+      if (input.kind === "export" || input.kind === "deletion") {
+        const workflowResult = await client.query<{
+          id: string;
+          status: string;
+          version: number;
+        }>(
+          "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step) values ($1,$2,$3,$4,$5,'pending','[]','identity-verification') returning id,status,version",
+          [
+            randomUUID(),
+            context.organizationId,
+            context.householdId,
+            input.kind,
+            `privacy:${privacyId}`,
+          ],
+        );
+        workflow = workflowResult.rows[0];
+        if (!workflow)
+          throw new Error("privacy workflow insert returned no row");
+      }
+      const response = {
+        privacyRequest,
+        ...(workflow ? { workflow } : {}),
+      };
+      await client.query(
+        "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
     });
   }
 

@@ -37,13 +37,42 @@ function requiredString(body: Record<string, unknown>, field: string): string {
 
 function idempotencyKey(request: FastifyRequest): string {
   const value = request.headers["idempotency-key"];
-  if (typeof value !== "string" || value.length < 16)
+  if (
+    typeof value !== "string" ||
+    value.length < 16 ||
+    value.length > 128 ||
+    !/^[A-Za-z0-9._:-]+$/u.test(value)
+  )
     throw new ApiProblem(
       400,
       "Invalid request",
       "a valid idempotency-key header is required",
     );
   return value;
+}
+
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+function requiredUuid(body: Record<string, unknown>, field: string): string {
+  const value = requiredString(body, field);
+  if (!uuidPattern.test(value))
+    throw new ApiProblem(400, "Invalid request", `${field} must be a UUID`);
+  return value;
+}
+
+function requiredPositiveInteger(
+  body: Record<string, unknown>,
+  field: string,
+): number {
+  const value = body[field];
+  if (!Number.isSafeInteger(value) || (value as number) < 1)
+    throw new ApiProblem(
+      400,
+      "Invalid request",
+      `${field} must be a positive integer`,
+    );
+  return value as number;
 }
 
 export async function registerVaultRoutes(
@@ -81,6 +110,59 @@ export async function registerVaultRoutes(
     const identity = await dependencies.resolveIdentity(request);
     const body = objectBody(request.body);
     const key = idempotencyKey(request);
+    const ciphertextBase64 = requiredString(body, "ciphertextBase64");
+    if (
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(
+        ciphertextBase64,
+      )
+    )
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "ciphertextBase64 is invalid",
+      );
+    const ciphertext = Buffer.from(ciphertextBase64, "base64");
+    if (ciphertext.length < 17)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "encrypted fact envelope is invalid",
+      );
+    const sourceType = requiredString(body, "sourceType");
+    if (
+      !["manual", "document", "interview", "professional"].includes(sourceType)
+    )
+      throw new ApiProblem(400, "Invalid request", "sourceType is invalid");
+    const sensitivity = requiredString(body, "sensitivity");
+    if (!["standard", "sensitive", "highly-sensitive"].includes(sensitivity))
+      throw new ApiProblem(400, "Invalid request", "sensitivity is invalid");
+    if (
+      body.evidenceIds !== undefined &&
+      (!Array.isArray(body.evidenceIds) ||
+        !body.evidenceIds.every(
+          (item) => typeof item === "string" && uuidPattern.test(item),
+        ))
+    )
+      throw new ApiProblem(400, "Invalid request", "evidenceIds are invalid");
+    if (
+      body.confidence !== undefined &&
+      (typeof body.confidence !== "number" ||
+        body.confidence < 0 ||
+        body.confidence > 1)
+    )
+      throw new ApiProblem(400, "Invalid request", "confidence is invalid");
+    const candidate = {
+      fieldKey: requiredString(body, "fieldKey"),
+      ciphertext,
+      keyVersion: requiredPositiveInteger(body, "keyVersion"),
+      sourceType,
+      sourceId: requiredUuid(body, "sourceId"),
+      evidenceIds: (body.evidenceIds ?? []) as string[],
+      ...(typeof body.confidence === "number"
+        ? { confidence: body.confidence }
+        : {}),
+      sensitivity,
+    };
     const reservation = await dependencies.repository.reserveIdempotency(
       identity,
       key,
@@ -95,34 +177,9 @@ export async function registerVaultRoutes(
         );
       return reply.code(reservation.statusCode).send(reservation.responseBody);
     }
-    const ciphertext = Buffer.from(
-      requiredString(body, "ciphertextBase64"),
-      "base64",
-    );
-    if (ciphertext.length < 17)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "encrypted fact envelope is invalid",
-      );
     const created = await dependencies.repository.createCandidateFact(
       identity,
-      {
-        fieldKey: requiredString(body, "fieldKey"),
-        ciphertext,
-        keyVersion: Number(body.keyVersion),
-        sourceType: requiredString(body, "sourceType"),
-        sourceId: requiredString(body, "sourceId"),
-        evidenceIds: Array.isArray(body.evidenceIds)
-          ? body.evidenceIds.filter(
-              (item): item is string => typeof item === "string",
-            )
-          : [],
-        ...(typeof body.confidence === "number"
-          ? { confidence: body.confidence }
-          : {}),
-        sensitivity: requiredString(body, "sensitivity"),
-      },
+      candidate,
     );
     await dependencies.repository.completeIdempotency(
       identity,
@@ -217,11 +274,13 @@ export async function registerVaultRoutes(
         "Invalid request",
         "privacy request kind is invalid",
       );
-    const workflow = await dependencies.repository.beginWorkflow(identity, {
-      kind: kind === "deletion" ? "deletion" : "export",
+    const personId = requiredUuid(body, "personId");
+    const result = await dependencies.repository.startPrivacyRequest(identity, {
+      personId,
+      kind: kind as "access" | "correction" | "export" | "deletion" | "appeal",
       idempotencyKey: idempotencyKey(request),
-      firstStep: "identity-verification",
+      requestedAt: new Date().toISOString(),
     });
-    return reply.code(202).send(workflow);
+    return reply.code(202).send(result);
   });
 }
