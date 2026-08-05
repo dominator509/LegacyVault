@@ -27,6 +27,10 @@ const environmentSchema = z
     STRIPE_SECRET_KEY: z.string().optional(),
     STRIPE_WEBHOOK_SECRET: z.string().optional(),
     STRIPE_PRICE_ESSENTIAL: z.string().optional(),
+    R2_ACCESS_KEY_ID: z.string().optional(),
+    R2_SECRET_ACCESS_KEY: z.string().optional(),
+    R2_BUCKET: z.string().optional(),
+    R2_ENDPOINT: z.string().url().optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && value.LOCAL_ENGINEERING_MODE) {
@@ -62,6 +66,10 @@ const environmentSchema = z
       "STRIPE_SECRET_KEY",
       "STRIPE_WEBHOOK_SECRET",
       "STRIPE_PRICE_ESSENTIAL",
+      "R2_ACCESS_KEY_ID",
+      "R2_SECRET_ACCESS_KEY",
+      "R2_BUCKET",
+      "R2_ENDPOINT",
     ] as const) {
       if (value.NODE_ENV === "production" && !value[field])
         context.addIssue({

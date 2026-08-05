@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { PostgresAuditStore } from "@legacy/audit";
 import {
   AuthorizationDeniedError,
@@ -18,6 +18,7 @@ import { VaultRepository } from "@legacy/database/repository";
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
 import { generateReport } from "@legacy/reports";
 import type { CandidateFact } from "@legacy/domain";
+import { DocumentObjectStore } from "@legacy/documents";
 import {
   LocalSmtpCaptureAdapter,
   ResendEmailAdapter,
@@ -38,6 +39,21 @@ function htmlEscape(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function storedEnvelope(value: unknown): EncryptedEnvelope {
+  if (!value || typeof value !== "object")
+    throw new Error("encrypted envelope is invalid");
+  const envelope = value as Partial<EncryptedEnvelope>;
+  if (
+    envelope.algorithm !== "A256GCM" ||
+    !Number.isSafeInteger(envelope.keyVersion) ||
+    typeof envelope.iv !== "string" ||
+    typeof envelope.ciphertext !== "string" ||
+    typeof envelope.authenticationTag !== "string"
+  )
+    throw new Error("encrypted envelope is invalid");
+  return envelope as EncryptedEnvelope;
+}
+
 export function createApplicationRuntime(environment: Environment): {
   dependencies: ServerDependencies;
   close(): Promise<void>;
@@ -51,7 +67,11 @@ export function createApplicationRuntime(environment: Environment): {
     !environment.REDIS_URL ||
     !environment.API_BASE_URL ||
     !environment.APP_BASE_URL ||
-    !environment.EMAIL_FROM
+    !environment.EMAIL_FROM ||
+    !environment.R2_ACCESS_KEY_ID ||
+    !environment.R2_SECRET_ACCESS_KEY ||
+    !environment.R2_BUCKET ||
+    !environment.R2_ENDPOINT
   )
     throw new Error("application runtime configuration is incomplete");
   const repository = new VaultRepository(environment.DATABASE_URL);
@@ -67,6 +87,15 @@ export function createApplicationRuntime(environment: Environment): {
     environment.DATABASE_URL,
     applicationKek,
   );
+  const documentObjectStore = new DocumentObjectStore({
+    endpoint: environment.R2_ENDPOINT,
+    region: "auto",
+    bucket: environment.R2_BUCKET,
+    accessKeyId: environment.R2_ACCESS_KEY_ID,
+    secretAccessKey: environment.R2_SECRET_ACCESS_KEY,
+    forcePathStyle: environment.LOCAL_ENGINEERING_MODE,
+    allowBucketCreation: environment.LOCAL_ENGINEERING_MODE,
+  });
   const email = environment.LOCAL_ENGINEERING_MODE
     ? new LocalSmtpCaptureAdapter({
         host: "127.0.0.1",
@@ -279,6 +308,112 @@ export function createApplicationRuntime(environment: Environment): {
           householdId: identity.householdId,
           plan: "essential",
         }),
+      startDocumentUpload: async (identity, input) => {
+        const id = randomUUID();
+        const dataKey = randomBytes(32);
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          const record = await repository.startDocumentUpload(identity, {
+            id,
+            objectKey: documentObjectStore.createObjectKey(),
+            originalSha256: input.originalSha256,
+            mediaType: input.mediaType,
+            wrappedDataKey: encryptEnvelope(
+              dataKey,
+              householdKey.plaintextKey,
+              {
+                organizationId: identity.organizationId,
+                householdId: identity.householdId,
+                recordId: id,
+                purpose: "document-data-key",
+                keyVersion: householdKey.keyVersion,
+              },
+            ),
+            encryptionKeyVersion: householdKey.keyVersion,
+            maximumBytes: input.maximumBytes,
+            idempotencyKey: input.idempotencyKey,
+          });
+          const returnedKey =
+            record.id === id
+              ? dataKey
+              : decryptEnvelope(
+                  storedEnvelope(record.wrappedDataKey),
+                  householdKey.plaintextKey,
+                  {
+                    organizationId: identity.organizationId,
+                    householdId: identity.householdId,
+                    recordId: record.id,
+                    purpose: "document-data-key",
+                    keyVersion: record.encryptionKeyVersion,
+                  },
+                );
+          try {
+            return {
+              document: {
+                id: record.id,
+                status: record.status,
+                version: record.version,
+              },
+              encryption: {
+                algorithm: "A256GCM" as const,
+                keyBase64: Buffer.from(returnedKey).toString("base64"),
+                keyVersion: record.encryptionKeyVersion,
+                purpose: "document-original",
+              },
+            };
+          } finally {
+            if (returnedKey !== dataKey) returnedKey.fill(0);
+          }
+        } finally {
+          dataKey.fill(0);
+          householdKey.plaintextKey.fill(0);
+        }
+      },
+      createDocumentUploadUrl: async (identity, input) => {
+        const document = await repository.getPendingDocumentUpload(
+          identity,
+          input.documentId,
+        );
+        if (document.version !== input.expectedVersion)
+          throw new Error("document upload version conflict");
+        const expiresInSeconds = 300;
+        return {
+          uploadUrl: await documentObjectStore.createPresignedUpload({
+            objectKey: document.objectKey,
+            checksumSha256Base64: Buffer.from(
+              input.ciphertextSha256,
+              "hex",
+            ).toString("base64"),
+            contentType: "application/vnd.legacy-vault.encrypted+json",
+            expiresInSeconds,
+          }),
+          expiresInSeconds,
+        };
+      },
+      completeDocumentUpload: async (identity, input) => {
+        const document = await repository.getPendingDocumentUpload(
+          identity,
+          input.documentId,
+        );
+        if (document.version !== input.expectedVersion)
+          throw new Error("document upload version conflict");
+        await documentObjectStore.assertStoredChecksum(
+          document.objectKey,
+          Buffer.from(input.ciphertextSha256, "hex").toString("base64"),
+        );
+        const started = await repository.completeDocumentUpload(identity, {
+          ...input,
+          uploadedAt: new Date().toISOString(),
+        });
+        await enqueueWorkflow(workflowQueue, "document-process", {
+          workflowId: started.workflow.id,
+          organizationId: identity.organizationId,
+          householdId: identity.householdId,
+          actorId: identity.actorId,
+        });
+        return started;
+      },
     },
     async close() {
       await Promise.all([

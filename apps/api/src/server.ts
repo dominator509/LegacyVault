@@ -12,6 +12,7 @@ import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
 import { createApplicationRuntime } from "./runtime.js";
 import type { AuthenticatedTenantIdentity } from "@legacy/auth";
 import type { StartedPortableExport } from "@legacy/database/repository";
+import type { StartedDocumentProcessing } from "@legacy/database/repository";
 
 export interface ServerDependencies {
   repository: VaultRepository;
@@ -36,6 +37,40 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     idempotencyKey: string,
   ) => Promise<{ id: string; url: string }>;
+  startDocumentUpload?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      idempotencyKey: string;
+      originalSha256: string;
+      mediaType: string;
+      maximumBytes: number;
+    },
+  ) => Promise<{
+    document: { id: string; status: string; version: number };
+    encryption: {
+      algorithm: "A256GCM";
+      keyBase64: string;
+      keyVersion: number;
+      purpose: string;
+    };
+  }>;
+  createDocumentUploadUrl?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      documentId: string;
+      expectedVersion: number;
+      ciphertextSha256: string;
+    },
+  ) => Promise<{ uploadUrl: string; expiresInSeconds: number }>;
+  completeDocumentUpload?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      documentId: string;
+      expectedVersion: number;
+      ciphertextSha256: string;
+      idempotencyKey: string;
+    },
+  ) => Promise<StartedDocumentProcessing>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -47,7 +82,10 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.startPortableExport ||
       !dependencies.encryptFactValue ||
       !dependencies.createReport ||
-      !dependencies.createCheckout)
+      !dependencies.createCheckout ||
+      !dependencies.startDocumentUpload ||
+      !dependencies.createDocumentUploadUrl ||
+      !dependencies.completeDocumentUpload)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",

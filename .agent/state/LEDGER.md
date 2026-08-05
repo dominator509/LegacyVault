@@ -121,3 +121,14 @@
 2026-08-05T23:06:35Z | codex | EP-004 | SIG | full_local_gate_runner_timeout_exit_124_after_5_seconds_before_sentinel
 2026-08-05T23:06:35Z | codex | EP-004 | HYPOTHESIS | runner_wrapper_timeout_is_shorter_than_repository_gate_duration_so_execute_declared_gates_as_bounded_individual_commands
 2026-08-05T23:09:44Z | codex | EP-004 | HEARTBEAT | authenticated_fixed_price_Stripe_Checkout_contract_and_fail_closed_route_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok
+2026-08-05T23:17:07Z | codex | EP-004 | SIG | lint_TS2307_api_workspace_missing_existing_documents_package_dependency
+2026-08-05T23:17:07Z | codex | EP-004 | HYPOTHESIS | declare_the_existing_reviewed_documents_workspace_boundary_in_api_manifest_then_rerun_lint
+2026-08-05T23:17:45Z | codex | EP-004 | SIG | install_ERR_PNPM_OUTDATED_LOCKFILE_after_reviewed_api_workspace_manifest_change_lint_remains_TS2307
+2026-08-05T23:17:45Z | codex | EP-004 | HYPOTHESIS | use_COMMANDS_ADR017_single_non_frozen_lock_refresh_then_frozen_install_audit_and_lint
+2026-08-05T23:18:46Z | codex | EP-004 | SIG | integration_application_runtime_configuration_incomplete_after_R2_runtime_boundary_became_required
+2026-08-05T23:18:46Z | codex | EP-004 | HYPOTHESIS | pass_the_existing_ignored_local_R2_fixture_values_into_the_explicit_test_environment
+2026-08-05T23:19:31Z | codex | EP-004 | SAFETY_DIAGNOSTIC | integration_execution_rejected_until_application_runtime_test_establishes_R2_endpoint_trust_boundary
+2026-08-05T23:19:31Z | codex | EP-004 | HYPOTHESIS | fail_test_module_before_runtime_composition_unless_configured_object_store_hostname_is_explicit_loopback
+2026-08-05T23:21:49Z | codex | EP-004 | SIG | typecheck_TS2345_optional_test_R2_endpoint_and_format_check_two_files_security_ok
+2026-08-05T23:21:49Z | codex | EP-004 | HYPOTHESIS | explicitly_assert_required_test_endpoint_before_URL_parse_then_run_authorized_formatter
+2026-08-05T23:24:20Z | codex | EP-004 | HEARTBEAT | two_phase_envelope_encrypted_presigned_upload_checksum_quarantine_RLS_workflow_unit_36_integration_37_e2e_2_build_format_security_audit_smoke_ok

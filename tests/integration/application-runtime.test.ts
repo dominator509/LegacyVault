@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { loadEnvironment } from "../../packages/contracts/src/environment.js";
 import { createApplicationRuntime } from "../../apps/api/src/runtime.js";
@@ -8,6 +8,7 @@ import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { AuthorizationDeniedError } from "../../packages/auth/src/index.js";
 import {
   decryptEnvelope,
+  encryptEnvelope,
   PostgresHouseholdKeyStore,
   type EncryptedEnvelope,
 } from "../../packages/crypto/src/index.js";
@@ -20,6 +21,12 @@ interface MailpitSummary {
 }
 
 const local = readLocalEnvironment();
+const objectStoreEndpoint = local.R2_ENDPOINT;
+if (!objectStoreEndpoint)
+  throw new Error("integration object storage endpoint is required");
+const objectStoreHost = new URL(objectStoreEndpoint).hostname;
+if (!["127.0.0.1", "localhost", "::1"].includes(objectStoreHost))
+  throw new Error("integration object storage endpoint must be loopback");
 const environment = loadEnvironment({
   NODE_ENV: "test",
   LOCAL_ENGINEERING_MODE: "true",
@@ -32,6 +39,10 @@ const environment = loadEnvironment({
   API_BASE_URL: "http://127.0.0.1:3001",
   APP_BASE_URL: "http://127.0.0.1:3000",
   EMAIL_FROM: "Legacy Vault <notices@localhost.invalid>",
+  R2_ACCESS_KEY_ID: local.R2_ACCESS_KEY_ID,
+  R2_SECRET_ACCESS_KEY: local.R2_SECRET_ACCESS_KEY,
+  R2_BUCKET: local.R2_BUCKET,
+  R2_ENDPOINT: local.R2_ENDPOINT,
 });
 const runtime = createApplicationRuntime(environment);
 const server = buildServer(runtime.dependencies);
@@ -271,6 +282,109 @@ describe("composed application runtime", () => {
           evidenceIds: [evidenceId],
         }),
       ]);
+
+      const documentPlaintext = Buffer.from(
+        "%PDF-1.7\nRuntime encrypted upload proof\n%%EOF",
+      );
+      const documentIdempotencyKey = `runtime-document-${randomUUID()}`;
+      const documentUpload = await runtime.dependencies.startDocumentUpload?.(
+        identity,
+        {
+          idempotencyKey: documentIdempotencyKey,
+          originalSha256: createHash("sha256")
+            .update(documentPlaintext)
+            .digest("hex"),
+          mediaType: "application/pdf",
+          maximumBytes: 1024 * 1024,
+        },
+      );
+      expect(documentUpload?.encryption.algorithm).toBe("A256GCM");
+      const replayedDocument = await runtime.dependencies.startDocumentUpload?.(
+        identity,
+        {
+          idempotencyKey: documentIdempotencyKey,
+          originalSha256: createHash("sha256")
+            .update(documentPlaintext)
+            .digest("hex"),
+          mediaType: "application/pdf",
+          maximumBytes: 1024 * 1024,
+        },
+      );
+      expect(replayedDocument).toEqual(documentUpload);
+      const documentKey = Buffer.from(
+        documentUpload?.encryption.keyBase64 ?? "",
+        "base64",
+      );
+      const documentCiphertext = Buffer.from(
+        JSON.stringify(
+          encryptEnvelope(documentPlaintext, documentKey, {
+            organizationId,
+            householdId,
+            recordId: documentUpload?.document.id ?? "",
+            purpose: "document-original",
+            keyVersion: documentUpload?.encryption.keyVersion ?? 0,
+          }),
+        ),
+      );
+      const ciphertextDigest = createHash("sha256")
+        .update(documentCiphertext)
+        .digest();
+      const signedUpload = await runtime.dependencies.createDocumentUploadUrl?.(
+        identity,
+        {
+          documentId: documentUpload?.document.id ?? "",
+          expectedVersion: documentUpload?.document.version ?? 0,
+          ciphertextSha256: ciphertextDigest.toString("hex"),
+        },
+      );
+      const uploadResponse = await fetch(signedUpload?.uploadUrl ?? "", {
+        method: "PUT",
+        headers: {
+          "content-type": "application/vnd.legacy-vault.encrypted+json",
+          "x-amz-checksum-sha256": ciphertextDigest.toString("base64"),
+        },
+        body: documentCiphertext,
+      });
+      expect(uploadResponse.ok).toBe(true);
+      const documentProcessing =
+        await runtime.dependencies.completeDocumentUpload?.(identity, {
+          documentId: documentUpload?.document.id ?? "",
+          expectedVersion: documentUpload?.document.version ?? 0,
+          ciphertextSha256: ciphertextDigest.toString("hex"),
+          idempotencyKey: `runtime-document-complete-${randomUUID()}`,
+        });
+      expect(documentProcessing).toMatchObject({
+        document: { status: "quarantined", version: 2 },
+        workflow: { status: "pending", version: 1 },
+      });
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [organizationId, householdId],
+      );
+      const documentRow = await client.query<{
+        status: string;
+        ciphertext_sha256: string;
+        wrapped_data_key: unknown;
+        subject_type: string;
+        subject_id: string;
+      }>(
+        "select d.status,d.ciphertext_sha256,d.wrapped_data_key,w.subject_type,w.subject_id from documents d join workflow_runs w on w.subject_id=d.id where d.id=$1",
+        [documentUpload?.document.id],
+      );
+      await client.query("commit");
+      expect(documentRow.rows[0]).toMatchObject({
+        status: "quarantined",
+        ciphertext_sha256: ciphertextDigest.toString("hex"),
+        subject_type: "Document",
+        subject_id: documentUpload?.document.id,
+      });
+      expect(
+        JSON.stringify(documentRow.rows[0]?.wrapped_data_key),
+      ).not.toContain(documentUpload?.encryption.keyBase64);
+      documentPlaintext.fill(0);
+      documentKey.fill(0);
+      documentCiphertext.fill(0);
     } finally {
       await client.end();
     }

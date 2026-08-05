@@ -73,6 +73,21 @@ export interface EncryptedFactForReport {
   confirmedAt: string;
   version: number;
 }
+export interface DocumentUploadRecord {
+  id: string;
+  objectKey: string;
+  originalSha256: string;
+  mediaType: string;
+  status: string;
+  encryptionKeyVersion: number;
+  wrappedDataKey: unknown;
+  maximumBytes: number;
+  version: number;
+}
+export interface StartedDocumentProcessing {
+  document: { id: string; status: string; version: number };
+  workflow: { id: string; status: string; version: number };
+}
 
 export class VaultRepository {
   readonly #pool: pg.Pool;
@@ -269,6 +284,231 @@ export class VaultRepository {
       const row = result.rows[0];
       if (!row) throw new Error("consent insert returned no row");
       return row;
+    });
+  }
+
+  async startDocumentUpload(
+    context: TenantContext,
+    input: {
+      id: string;
+      objectKey: string;
+      originalSha256: string;
+      mediaType: string;
+      wrappedDataKey: unknown;
+      encryptionKeyVersion: number;
+      maximumBytes: number;
+      idempotencyKey: string;
+    },
+  ): Promise<DocumentUploadRecord> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            originalSha256: input.originalSha256,
+            mediaType: input.mediaType,
+            maximumBytes: input.maximumBytes,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      let documentId = input.id;
+      if (reserved.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: { document?: { id?: string } } | null;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const reservation = existing.rows[0];
+        const replayId = reservation?.response_body?.document?.id;
+        if (reservation?.request_hash !== requestHash || !replayId)
+          throw new Error("document upload idempotency conflict");
+        documentId = replayId;
+      } else {
+        await client.query(
+          "insert into documents(id,organization_id,household_id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes) values ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9)",
+          [
+            input.id,
+            context.organizationId,
+            context.householdId,
+            input.objectKey,
+            input.originalSha256,
+            input.mediaType,
+            input.encryptionKeyVersion,
+            JSON.stringify(input.wrappedDataKey),
+            input.maximumBytes,
+          ],
+        );
+        await client.query(
+          "update idempotency_records set status_code=201,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+          [
+            JSON.stringify({ document: { id: input.id } }),
+            context.organizationId,
+            context.householdId,
+            input.idempotencyKey,
+          ],
+        );
+      }
+      const result = await client.query<{
+        id: string;
+        object_key: string;
+        original_sha256: string;
+        media_type: string;
+        status: string;
+        encryption_key_version: number;
+        wrapped_data_key: unknown;
+        maximum_bytes: string;
+        version: number;
+      }>(
+        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version from documents where id=$1",
+        [documentId],
+      );
+      const row = result.rows[0];
+      if (!row || row.status !== "pending" || !row.wrapped_data_key)
+        throw new Error("document upload is unavailable");
+      return {
+        id: row.id,
+        objectKey: row.object_key,
+        originalSha256: row.original_sha256,
+        mediaType: row.media_type,
+        status: row.status,
+        encryptionKeyVersion: row.encryption_key_version,
+        wrappedDataKey: row.wrapped_data_key,
+        maximumBytes: Number(row.maximum_bytes),
+        version: row.version,
+      };
+    });
+  }
+
+  async getPendingDocumentUpload(
+    context: TenantContext,
+    documentId: string,
+  ): Promise<DocumentUploadRecord> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        object_key: string;
+        original_sha256: string;
+        media_type: string;
+        status: string;
+        encryption_key_version: number;
+        wrapped_data_key: unknown;
+        maximum_bytes: string;
+        version: number;
+      }>(
+        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version from documents where id=$1 and status='pending'",
+        [documentId],
+      );
+      const row = result.rows[0];
+      if (!row || !row.wrapped_data_key)
+        throw new Error("document upload is unavailable");
+      return {
+        id: row.id,
+        objectKey: row.object_key,
+        originalSha256: row.original_sha256,
+        mediaType: row.media_type,
+        status: row.status,
+        encryptionKeyVersion: row.encryption_key_version,
+        wrappedDataKey: row.wrapped_data_key,
+        maximumBytes: Number(row.maximum_bytes),
+        version: row.version,
+      };
+    });
+  }
+
+  async completeDocumentUpload(
+    context: TenantContext,
+    input: {
+      documentId: string;
+      expectedVersion: number;
+      ciphertextSha256: string;
+      idempotencyKey: string;
+      uploadedAt: string;
+    },
+  ): Promise<StartedDocumentProcessing> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            documentId: input.documentId,
+            expectedVersion: input.expectedVersion,
+            ciphertextSha256: input.ciphertextSha256,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: StartedDocumentProcessing | null;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (row?.request_hash !== requestHash || !row.response_body)
+          throw new Error("document completion idempotency conflict");
+        return row.response_body;
+      }
+      const documentResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "update documents set status='quarantined',ciphertext_sha256=$1,uploaded_at=$2,version=version+1 where id=$3 and status='pending' and version=$4 returning id,status,version",
+        [
+          input.ciphertextSha256,
+          input.uploadedAt,
+          input.documentId,
+          input.expectedVersion,
+        ],
+      );
+      const document = documentResult.rows[0];
+      if (!document) throw new Error("document upload version conflict");
+      const workflowResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,'document-processing',$4,'pending','[]','scan','Document',$5) returning id,status,version",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          `document:${input.documentId}`,
+          input.documentId,
+        ],
+      );
+      const workflow = workflowResult.rows[0];
+      if (!workflow) throw new Error("document workflow was not persisted");
+      const response = { document, workflow };
+      await client.query(
+        "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
     });
   }
 

@@ -129,6 +129,32 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       idempotencyKey: string,
     ) => Promise<{ id: string; url: string }>;
+    startDocumentUpload?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        idempotencyKey: string;
+        originalSha256: string;
+        mediaType: string;
+        maximumBytes: number;
+      },
+    ) => Promise<unknown>;
+    createDocumentUploadUrl?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        documentId: string;
+        expectedVersion: number;
+        ciphertextSha256: string;
+      },
+    ) => Promise<{ uploadUrl: string; expiresInSeconds: number }>;
+    completeDocumentUpload?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        documentId: string;
+        expectedVersion: number;
+        ciphertextSha256: string;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -283,6 +309,139 @@ export async function registerVaultRoutes(
     );
     return reply.code(201).send(created);
   });
+
+  server.post("/v1/documents", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    const body = objectBody(request.body);
+    const key = idempotencyKey(request);
+    const originalSha256 = requiredString(body, "originalSha256");
+    if (!/^[0-9a-f]{64}$/u.test(originalSha256))
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "originalSha256 must be a lowercase SHA-256 digest",
+      );
+    const mediaType = requiredString(body, "mediaType");
+    if (
+      !["application/pdf", "image/jpeg", "image/png", "image/tiff"].includes(
+        mediaType,
+      )
+    )
+      throw new ApiProblem(400, "Invalid request", "mediaType is invalid");
+    const maximumBytes = requiredPositiveInteger(body, "maximumBytes");
+    if (maximumBytes > 100 * 1024 * 1024)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "maximumBytes exceeds the service limit",
+      );
+    for (const category of allRecordCategories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "create",
+        purpose: "vault.document.create",
+      });
+    if (!dependencies.startDocumentUpload)
+      throw new ApiProblem(
+        503,
+        "Document upload unavailable",
+        "Document uploads are not configured.",
+      );
+    const started = await dependencies.startDocumentUpload(identity, {
+      idempotencyKey: key,
+      originalSha256,
+      mediaType,
+      maximumBytes,
+    });
+    return reply.header("cache-control", "no-store").code(201).send(started);
+  });
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/documents/:id/upload-url",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      idempotencyKey(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "document id is invalid");
+      const body = objectBody(request.body);
+      const ciphertextSha256 = requiredString(body, "ciphertextSha256");
+      if (!/^[0-9a-f]{64}$/u.test(ciphertextSha256))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "ciphertextSha256 must be a lowercase SHA-256 digest",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "create",
+          purpose: "vault.document.upload-url",
+        });
+      if (!dependencies.createDocumentUploadUrl)
+        throw new ApiProblem(
+          503,
+          "Document upload unavailable",
+          "Document uploads are not configured.",
+        );
+      const signed = await dependencies.createDocumentUploadUrl(identity, {
+        documentId: request.params.id,
+        expectedVersion,
+        ciphertextSha256,
+      });
+      return reply.header("cache-control", "no-store").send(signed);
+    },
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/documents/:id/complete",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const key = idempotencyKey(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "document id is invalid");
+      const body = objectBody(request.body);
+      const ciphertextSha256 = requiredString(body, "ciphertextSha256");
+      if (!/^[0-9a-f]{64}$/u.test(ciphertextSha256))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "ciphertextSha256 must be a lowercase SHA-256 digest",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "create",
+          purpose: "vault.document.complete",
+        });
+      if (!dependencies.completeDocumentUpload)
+        throw new ApiProblem(
+          503,
+          "Document upload unavailable",
+          "Document uploads are not configured.",
+        );
+      const completed = await dependencies.completeDocumentUpload(identity, {
+        documentId: request.params.id,
+        expectedVersion,
+        ciphertextSha256,
+        idempotencyKey: key,
+      });
+      return reply.code(202).send(completed);
+    },
+  );
 
   server.post<{ Params: { id: string } }>(
     "/v1/facts/:id/confirm",
