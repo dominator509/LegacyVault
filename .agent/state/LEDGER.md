@@ -462,3 +462,7 @@
 2026-08-06T14:29:33Z | codex | EP-010 | LEASE | explicit_implementation_continuation_ship_gate_and_handoff_ADR009
 2026-08-06T14:32:16Z | codex | EP-010 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
 2026-08-06T14:32:16Z | codex | EP-010 | HEARTBEAT | fourteen_outcome_matrix_full_evidence_filename_gate_release_instructions_and_fail_closed_status_materialized
+2026-08-06T14:39:05Z | codex | EP-010 | SIG | exact_production_readiness_exit_1_missing_STRIPE_SECRET_KEY_EXT005
+2026-08-06T14:39:05Z | codex | EP-010 | EXTERNAL_DEFERRED | M2_ship_sentinel_release_tag_staging_and_production_remain_blocked_by_consolidated_external_requirements
+2026-08-06T14:39:05Z | codex | EP-010 | CONTINUATION_PASS | maximum_independent_engineering_complete_unit_59_integration_72_e2e_6_contract_39_operations_1727_cases_four_OCI_targets_local_release_migration_backup_restore_security_audit_smoke_DeepSeek_live_fire_ok
+2026-08-06T14:39:05Z | codex | EP-010 | LEASE_RELEASE | maximum_engineering_complete_exact_ship_gate_externally_blocked_no_release_or_green_tag
