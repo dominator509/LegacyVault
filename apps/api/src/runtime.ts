@@ -595,6 +595,63 @@ export function createApplicationRuntime(environment: Environment): {
         }
       },
       listVaultDocuments: (identity) => repository.listVaultDocuments(identity),
+      getDocumentContent: async (identity, documentId) => {
+        const document = await repository.getDocumentDownloadMaterial(
+          identity,
+          documentId,
+        );
+        if (!document) return null;
+        if (
+          (await documentObjectStore.objectStatus(document.objectKey)) !==
+          "clean"
+        )
+          throw new Error("document object is not clean");
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        const ciphertext = await documentObjectStore.getCiphertext(
+          document.objectKey,
+        );
+        let dataKey: Uint8Array | undefined;
+        try {
+          if (
+            createHash("sha256").update(ciphertext).digest("hex") !==
+            document.ciphertextSha256
+          )
+            throw new Error("document ciphertext checksum mismatch");
+          dataKey = decryptEnvelope(
+            document.wrappedDataKey as EncryptedEnvelope,
+            householdKey.plaintextKey,
+            {
+              organizationId: identity.organizationId,
+              householdId: identity.householdId,
+              recordId: document.id,
+              purpose: "document-data-key",
+              keyVersion: document.encryptionKeyVersion,
+            },
+          );
+          return {
+            bytes: decryptEnvelope(
+              JSON.parse(
+                Buffer.from(ciphertext).toString("utf8"),
+              ) as EncryptedEnvelope,
+              dataKey,
+              {
+                organizationId: identity.organizationId,
+                householdId: identity.householdId,
+                recordId: document.id,
+                purpose: "document-original",
+                keyVersion: document.encryptionKeyVersion,
+              },
+            ),
+            mediaType: document.mediaType,
+            version: document.version,
+          };
+        } finally {
+          dataKey?.fill(0);
+          ciphertext.fill(0);
+          householdKey.plaintextKey.fill(0);
+        }
+      },
       listAuditEvents: async (identity, input) => {
         const page = await auditStore.readVerified(identity, input);
         return {

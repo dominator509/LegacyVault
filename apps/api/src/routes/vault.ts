@@ -367,6 +367,14 @@ export async function registerVaultRoutes(
     listVaultDocuments?: (
       identity: AuthenticatedTenantIdentity,
     ) => Promise<readonly unknown[]>;
+    getDocumentContent?: (
+      identity: AuthenticatedTenantIdentity,
+      documentId: string,
+    ) => Promise<{
+      bytes: Uint8Array;
+      mediaType: string;
+      version: number;
+    } | null>;
     listAuditEvents?: (
       identity: AuthenticatedTenantIdentity,
       input: { afterSequence: number; limit: number },
@@ -755,6 +763,75 @@ export async function registerVaultRoutes(
         });
       const documents = await dependencies.listVaultDocuments(identity);
       return reply.header("cache-control", "no-store").send({ documents });
+    },
+  );
+
+  server.get<{ Params: { id: string } }>(
+    "/v1/documents/:id/content",
+    {
+      schema: {
+        tags: ["documents"],
+        summary: "Download an authorized clean document",
+        security: [{ sessionCookie: [] }],
+        params: uuidPathSchema,
+        response: {
+          200: {
+            description: "Decrypted document bytes",
+            content: {
+              "application/octet-stream": {
+                schema: { type: "string", format: "binary" },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.getDocumentContent)
+        throw new ApiProblem(
+          503,
+          "Document unavailable",
+          "Document content retrieval is not configured.",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "read",
+          purpose: "vault.document.content.read",
+        });
+      const content = await dependencies.getDocumentContent(
+        identity,
+        request.params.id,
+      );
+      if (!content)
+        throw new ApiProblem(
+          404,
+          "Document not found",
+          "A clean retained document was not found.",
+        );
+      const body = Buffer.from(content.bytes);
+      content.bytes.fill(0);
+      const clear = () => body.fill(0);
+      reply.raw.once("finish", clear);
+      reply.raw.once("close", clear);
+      const extension =
+        content.mediaType === "application/pdf"
+          ? "pdf"
+          : content.mediaType === "image/jpeg"
+            ? "jpg"
+            : content.mediaType === "image/png"
+              ? "png"
+              : "tiff";
+      return reply
+        .header("cache-control", "no-store")
+        .header("x-content-type-options", "nosniff")
+        .header(
+          "content-disposition",
+          `attachment; filename="${request.params.id}.${extension}"`,
+        )
+        .type(content.mediaType)
+        .send(body);
     },
   );
 

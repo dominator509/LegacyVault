@@ -616,6 +616,13 @@ describe("composed application runtime", () => {
           workflow_status: "running",
           last_error_class: null,
         });
+        const downloaded = await runtime.dependencies.getDocumentContent?.(
+          identity,
+          documentUpload?.document.id ?? "",
+        );
+        expect(downloaded?.mediaType).toBe("image/png");
+        expect(Buffer.from(downloaded?.bytes ?? [])).toEqual(documentPlaintext);
+        downloaded?.bytes.fill(0);
         const persistedDocument =
           await runtime.dependencies.repository.getDocumentProcessingInput(
             identity,

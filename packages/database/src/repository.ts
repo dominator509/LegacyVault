@@ -1005,6 +1005,45 @@ export class VaultRepository {
     });
   }
 
+  async getDocumentDownloadMaterial(
+    context: TenantContext,
+    documentId: string,
+  ): Promise<{
+    id: string;
+    objectKey: string;
+    mediaType: string;
+    ciphertextSha256: string;
+    wrappedDataKey: unknown;
+    encryptionKeyVersion: number;
+    version: number;
+  } | null> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        object_key: string;
+        media_type: string;
+        ciphertext_sha256: string | null;
+        wrapped_data_key: unknown;
+        encryption_key_version: number;
+        version: number;
+      }>(
+        "select id,object_key,media_type,ciphertext_sha256,wrapped_data_key,encryption_key_version,version from documents where id=$1 and status='clean' and original_deleted_at is null",
+        [documentId],
+      );
+      const row = result.rows[0];
+      if (!row || !row.ciphertext_sha256 || !row.wrapped_data_key) return null;
+      return {
+        id: row.id,
+        objectKey: row.object_key,
+        mediaType: row.media_type,
+        ciphertextSha256: row.ciphertext_sha256,
+        wrappedDataKey: row.wrapped_data_key,
+        encryptionKeyVersion: row.encryption_key_version,
+        version: row.version,
+      };
+    });
+  }
+
   async createEmergencyAccessRequest(
     context: TenantContext,
     input: {

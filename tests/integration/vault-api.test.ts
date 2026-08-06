@@ -53,6 +53,7 @@ let observedFactCategories: readonly string[] = [];
 let observedInvitationToken = "";
 let billingAccessEnabled = true;
 const completedExportId = randomUUID();
+const downloadableDocumentId = randomUUID();
 const server = buildServer({
   repository,
   resolveAccount: async () => account,
@@ -266,6 +267,14 @@ const server = buildServer({
       version: 2,
     },
   ],
+  getDocumentContent: async (_resolved, documentId) =>
+    documentId === downloadableDocumentId
+      ? {
+          bytes: Buffer.from("authorized document plaintext", "utf8"),
+          mediaType: "application/pdf",
+          version: 4,
+        }
+      : null,
   listAuditEvents: async (_resolved, input) => ({
     events: [
       {
@@ -487,6 +496,7 @@ describe("vault API persistence", () => {
       "/v1/members",
       "/v1/facts",
       "/v1/documents",
+      "/v1/documents/{id}/content",
       "/v1/audit-events",
       "/v1/consents",
       "/v1/privacy-requests",
@@ -681,6 +691,28 @@ describe("vault API persistence", () => {
     expect(documents.headers["cache-control"]).toBe("no-store");
     expect(documents.body).not.toContain("objectKey");
     expect(documents.body).not.toContain("wrapped");
+  });
+
+  it("streams authorized clean document content without exposing key material", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: `/v1/documents/${downloadableDocumentId}/content`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.headers["x-content-type-options"]).toBe("nosniff");
+    expect(response.headers["content-type"]).toContain("application/pdf");
+    expect(response.headers["content-disposition"]).toBe(
+      `attachment; filename="${downloadableDocumentId}.pdf"`,
+    );
+    expect(response.body).toBe("authorized document plaintext");
+    expect(response.body).not.toContain("keyBase64");
+    expect(response.body).not.toContain("objectKey");
+    expect(
+      authorizationScopes.filter(
+        ({ purpose }) => purpose === "vault.document.content.read",
+      ),
+    ).toHaveLength(13);
   });
 
   it("authorizes and returns a bounded verified audit page without caching", async () => {
