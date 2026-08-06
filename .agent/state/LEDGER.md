@@ -402,3 +402,8 @@
 2026-08-06T12:13:54Z | codex | EP-005 | HEARTBEAT | privacy_form_captures_currentTarget_before_async_self_identity_lookup_format_type_ok_real_POST_persisted_202
 2026-08-06T12:13:57Z | codex | EP-005 | CONTINUATION_PASS | bounded_privacy_form_event_lifetime_defect_corrected_no_NODE_DONE_or_green_tag
 2026-08-06T12:14:03Z | codex | EP-005 | LEASE_RELEASE | privacy_form_event_correction_complete_return_to_EP007
+2026-08-06T12:14:58Z | codex | EP-007 | LEASE | resume_after_EP005_async_privacy_form_correction
+2026-08-06T12:15:06Z | codex | EP-007 | SIG | privacy_diagnostic_expected_201_but_observed_persisted_async_workflow_202_exit_1
+2026-08-06T12:15:10Z | codex | EP-007 | HYPOTHESIS | assert_the_observed_and_contract_appropriate_202_Accepted_status_then_complete_UI_success_proof
+2026-08-06T12:18:05Z | codex | EP-007 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
+2026-08-06T12:18:09Z | codex | EP-007 | HEARTBEAT | pinned_k6_2.0.0_digest_50_VUs_p95_234.06ms_50_cached_AI_calls_real_browser_core_outcomes_e2e_6_ok

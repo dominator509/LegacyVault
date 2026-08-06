@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { performance } from "node:perf_hooks";
 import { Redis } from "ioredis";
 import { describe, expect, it } from "vitest";
 import { createApplicationRuntime } from "../../apps/api/src/runtime.js";
@@ -10,7 +11,7 @@ import { readLocalEnvironment } from "../helpers/local-environment.js";
 const local = readLocalEnvironment();
 
 describe("consent-bound AI interview live fire", () => {
-  it("uses DeepSeek only after active consent and replays the exact tenant request", async () => {
+  it("uses DeepSeek only after active consent and serves 50 concurrent exact-cache sessions", async () => {
     const endpoint = new URL(local.DEEPSEEK_BASE_URL ?? "");
     if (
       endpoint.protocol !== "https:" ||
@@ -135,6 +136,27 @@ describe("consent-bound AI interview live fire", () => {
           version: consent.version,
         },
       });
+      const concurrent = await Promise.all(
+        Array.from({ length: 50 }, async () => {
+          const started = performance.now();
+          const response = await runtime.dependencies.runAiInterview?.(
+            identity,
+            {
+              ...request,
+              idempotencyKey: `ai-live-concurrent-${randomUUID()}`,
+            },
+          );
+          return { duration: performance.now() - started, response };
+        }),
+      );
+      expect(concurrent.map(({ response }) => response)).toEqual(
+        Array.from({ length: 50 }, () => first),
+      );
+      const durations = concurrent
+        .map(({ duration }) => duration)
+        .sort((left, right) => left - right);
+      const p95 = durations[Math.ceil(durations.length * 0.95) - 1] ?? Infinity;
+      expect(p95).toBeLessThan(400);
       await runtime.dependencies.repository.withdrawConsent(
         identity,
         consent.id,
