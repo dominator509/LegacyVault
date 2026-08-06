@@ -1,4 +1,5 @@
 import Fastify, { LogController } from "fastify";
+import swagger from "@fastify/swagger";
 import { pathToFileURL } from "node:url";
 import { loadEnvironment } from "@legacy/contracts/environment";
 import type { VaultRepository } from "@legacy/database/repository";
@@ -187,6 +188,23 @@ export function buildServer(dependencies?: ServerDependencies) {
     requestIdHeader: "x-request-id",
   });
 
+  server.register(swagger, {
+    openapi: {
+      openapi: "3.1.0",
+      info: {
+        title: "Legacy Vault API",
+        version: "0.1.0",
+        description:
+          "Privacy-first household continuity API. Authenticated tenant routes require the active household header.",
+      },
+      components: {
+        securitySchemes: {
+          sessionCookie: { type: "apiKey", in: "cookie", name: "session" },
+        },
+      },
+    },
+  });
+
   server.get("/health/live", async () => ({ status: "live" as const }));
   server.get("/health/ready", async (_request, reply) => {
     if (!environment.LOCAL_ENGINEERING_MODE && !environment.DATABASE_URL) {
@@ -201,6 +219,12 @@ export function buildServer(dependencies?: ServerDependencies) {
     externalVerificationDeferred: environment.LOCAL_ENGINEERING_MODE,
     serviceRoutesConfigured: Boolean(dependencies),
   }));
+  server.get(
+    "/openapi.json",
+    { schema: { hide: true } },
+    async (_request, reply) =>
+      reply.header("cache-control", "no-store").send(server.swagger()),
+  );
   if (dependencies)
     server.register(async (instance) =>
       registerVaultRoutes(instance, dependencies),

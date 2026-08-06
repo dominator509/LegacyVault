@@ -30,4 +30,16 @@ describe("API health entry points", () => {
       reason: "database-unconfigured",
     });
   });
+
+  it("publishes a machine-readable OpenAPI 3.1 contract", async () => {
+    const response = await fetch(`${baseUrl}/openapi.json`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const specification = (await response.json()) as {
+      openapi: string;
+      paths: Record<string, unknown>;
+    };
+    expect(specification.openapi).toBe("3.1.0");
+    expect(specification.paths).not.toHaveProperty("/openapi.json");
+  });
 });

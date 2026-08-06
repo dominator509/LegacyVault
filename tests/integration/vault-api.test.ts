@@ -222,6 +222,32 @@ afterAll(async () => {
 });
 
 describe("vault API persistence", () => {
+  it("publishes every implemented canonical route in OpenAPI", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/openapi.json",
+    });
+    expect(response.statusCode).toBe(200);
+    const specification = response.json<{
+      openapi: string;
+      paths: Record<string, unknown>;
+    }>();
+    expect(specification.openapi).toBe("3.1.0");
+    for (const path of [
+      "/v1/facts",
+      "/v1/documents",
+      "/v1/audit-events",
+      "/v1/consents",
+      "/v1/privacy-requests",
+      "/v1/exports",
+      "/v1/reports",
+      "/v1/emergency-access",
+      "/v1/billing/checkout",
+      "/v1/billing/subscription",
+    ])
+      expect(specification.paths).toHaveProperty(path);
+  });
+
   it("returns no-store category-scoped facts and secret-free document metadata", async () => {
     const facts = await server.inject({
       method: "GET",

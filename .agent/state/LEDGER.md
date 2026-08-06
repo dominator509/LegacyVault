@@ -251,3 +251,7 @@
 2026-08-06T03:37:59Z | codex | EP-004 | HYPOTHESIS | apply_the_source_changes_without_the_unneeded_empty_test_anchor_then_patch_the_real_billing_webhook_test_after_reading_it
 2026-08-06T03:37:59Z | codex | EP-004 | HEARTBEAT | owner_authorized_no_store_subscription_read_inactive_before_event_ordered_signed_webhook_active_status_no_provider_identifiers_focused_19_tests_format_type_security_ok
 2026-08-06T03:40:04Z | codex | EP-004 | HEARTBEAT | subscription_status_checkpoint_unit_41_integration_57_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:44:43Z | codex | EP-004 | SIG | first_OpenAPI_patch_verification_failed_on_incorrect_E2E_describe_anchor_before_any_file_change
+2026-08-06T03:44:43Z | codex | EP-004 | HYPOTHESIS | read_the_actual_health_E2E_structure_then_apply_the_reviewed_manifest_server_and_test_changes_with_exact_context
+2026-08-06T03:44:43Z | codex | EP-004 | HEARTBEAT | pinned_fastify_swagger_9_8_1_frozen_install_zero_known_vulnerabilities_non_cacheable_OpenAPI_3_1_live_route_inventory_real_TCP_E2E_3_focused_21_tests_type_security_ok_operation_schemas_pending
+2026-08-06T03:46:57Z | codex | EP-004 | HEARTBEAT | OpenAPI_foundation_checkpoint_unit_41_integration_58_e2e_3_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
