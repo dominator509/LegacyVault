@@ -39,6 +39,7 @@ import {
   LocalSmtpCaptureAdapter,
   ResendEmailAdapter,
 } from "@legacy/notifications";
+import { ObservabilityRuntime } from "@legacy/observability";
 import { StripeAdapter } from "./adapters/stripe.js";
 import type { ServerDependencies } from "./server.js";
 
@@ -86,6 +87,7 @@ const aiInterviewSchema = z.object({
 
 export function createApplicationRuntime(environment: Environment): {
   dependencies: ServerDependencies;
+  observability: ObservabilityRuntime;
   close(): Promise<void>;
 } {
   if (
@@ -105,6 +107,17 @@ export function createApplicationRuntime(environment: Environment): {
   )
     throw new Error("application runtime configuration is incomplete");
   const repository = new VaultRepository(environment.DATABASE_URL);
+  const observability = new ObservabilityRuntime({
+    serviceName: "legacy-api",
+    environment: environment.NODE_ENV,
+    ...(environment.OTEL_EXPORTER_OTLP_ENDPOINT
+      ? { otlpEndpoint: environment.OTEL_EXPORTER_OTLP_ENDPOINT }
+      : {}),
+    ...(environment.OTEL_EXPORTER_OTLP_HEADERS
+      ? { otlpHeaders: environment.OTEL_EXPORTER_OTLP_HEADERS }
+      : {}),
+    ...(environment.SENTRY_DSN ? { sentryDsn: environment.SENTRY_DSN } : {}),
+  });
   const identityStore = new MembershipIdentityStore(environment.DATABASE_URL);
   const auditKey = Buffer.from(environment.AUDIT_HMAC_KEY, "base64");
   if (auditKey.byteLength < 32) throw new Error("audit HMAC key is invalid");
@@ -191,6 +204,62 @@ export function createApplicationRuntime(environment: Environment): {
   const aiGateway = new AiPolicyGateway(deepSeek, (metric) => {
     aiMetrics.push(metric);
     if (aiMetrics.length > 1_000) aiMetrics.shift();
+    const labels = {
+      provider: "deepseek",
+      task_family: metric.taskFamily,
+      prompt_version: metric.promptVersion,
+      model: metric.model,
+      mode: metric.mode,
+      outcome: metric.outcome,
+      ...(metric.errorClass
+        ? { error_class: metric.errorClass.toLowerCase() }
+        : {}),
+    };
+    observability.metrics.record(
+      "legacy_ai_request_duration_ms",
+      metric.latencyMs,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_input_tokens_total",
+      metric.usage.inputTokens,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_output_tokens_total",
+      metric.usage.outputTokens,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_cache_hit_tokens_total",
+      metric.usage.cacheHitTokens,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_cache_miss_tokens_total",
+      metric.usage.cacheMissTokens,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_cost_usd_total",
+      metric.estimatedCostUsd,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_dlp_findings_total",
+      metric.dlpFindingsCount,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_retries_total",
+      metric.retryCount,
+      labels,
+    );
+    observability.metrics.record(
+      "legacy_ai_schema_success_total",
+      metric.schemaSuccess ? 1 : 0,
+      labels,
+    );
   });
   const aiExactCache = new RedisExactCache(
     environment.REDIS_URL,
@@ -205,7 +274,9 @@ export function createApplicationRuntime(environment: Environment): {
     { requestHash: string; response: unknown }
   >();
   return {
+    observability,
     dependencies: {
+      observability,
       repository,
       stripe,
       auth: authRuntime.auth,
@@ -1130,6 +1201,7 @@ export function createApplicationRuntime(environment: Environment): {
         workflowQueue.close(),
         householdKeyStore.close(),
         aiExactCache.close(),
+        observability.close(),
       ]);
     },
   };

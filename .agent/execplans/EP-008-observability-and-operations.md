@@ -61,11 +61,13 @@ The verify sentinel is observed in this session, changed paths match this plan, 
 Re-enter from the first unchecked milestone after verifying the previous checkpoint. Use green tags and the rollback ladder. Never cross a completed node tag.
 
 # 11. Progress
-- [ ] M1 Implement bounded scope
+- [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- The Compose PostgreSQL container executes client tools as operating-system user `root`; every backup and restore client command must select `legacy_app` explicitly.
+- Git Bash launched through the Windows command bridge resolves `find` to the Windows utility, so the newest-backup selector uses a directory-constrained POSIX shell glob.
+- Empty optional telemetry values from the authorized local `.env` require normalization to `undefined` at the typed environment boundary.
 
 # 13. Decision Log
 - None recorded.

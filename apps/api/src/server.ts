@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import Fastify, { LogController } from "fastify";
 import swagger from "@fastify/swagger";
 import { pathToFileURL } from "node:url";
@@ -27,8 +28,13 @@ import type {
   AuthenticatedTenantIdentity,
 } from "@legacy/auth";
 import type { HouseholdMembershipSummary } from "@legacy/database/repository";
+import {
+  ObservabilityRuntime,
+  traceIdFromTraceparent,
+} from "@legacy/observability";
 
 export interface ServerDependencies {
+  observability?: ObservabilityRuntime;
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
   resolveAccount?: AccountResolver;
@@ -278,6 +284,71 @@ export function buildServer(dependencies?: ServerDependencies) {
     },
     requestIdHeader: "x-request-id",
   });
+  const requestStarted = new WeakMap<object, number>();
+  server.addHook("onRequest", async (request) => {
+    requestStarted.set(request, performance.now());
+  });
+  server.addHook("onResponse", async (request, reply) => {
+    const observability = dependencies?.observability;
+    if (!observability) return;
+    const durationMs = Math.max(
+      0,
+      performance.now() - (requestStarted.get(request) ?? performance.now()),
+    );
+    const route = request.routeOptions.url || "unmatched";
+    const method = request.method.toLowerCase();
+    const outcome =
+      reply.statusCode < 400
+        ? "success"
+        : reply.statusCode < 500
+          ? "denied"
+          : "failure";
+    const labels = {
+      service: "legacy-api",
+      environment: environment.NODE_ENV,
+      method,
+      route,
+      status_class: `${Math.floor(reply.statusCode / 100)}xx`,
+      outcome,
+    };
+    observability.metrics.record(
+      "legacy_http_request_duration_ms",
+      durationMs,
+      labels,
+    );
+    observability.metrics.record("legacy_http_requests_total", 1, labels);
+    const traceHeader = request.headers.traceparent;
+    const traceId =
+      traceIdFromTraceparent(
+        typeof traceHeader === "string" ? traceHeader : undefined,
+      ) ??
+      createHash("sha256")
+        .update(String(request.id))
+        .digest("hex")
+        .slice(0, 32);
+    request.log.info(
+      observability.log({
+        level: reply.statusCode >= 500 ? "error" : "info",
+        service: "legacy-api",
+        environment: environment.NODE_ENV,
+        requestId: String(request.id),
+        traceId,
+        action: `${method}:${route}`,
+        outcome,
+        durationMs,
+      }),
+      "request completed",
+    );
+  });
+  server.addHook("onError", async (request, _reply, error) => {
+    dependencies?.observability?.captureException(error, {
+      service: "legacy-api",
+      environment: environment.NODE_ENV,
+      method: request.method.toLowerCase(),
+      route: request.routeOptions.url || "unmatched",
+      error_class: error.name.toLowerCase(),
+    });
+  });
 
   server.register(swagger, {
     refResolver: {
@@ -373,6 +444,7 @@ export function buildServer(dependencies?: ServerDependencies) {
 async function main() {
   const environment = loadEnvironment(process.env);
   const runtime = createApplicationRuntime(environment);
+  await runtime.observability.start();
   const server = buildServer(runtime.dependencies);
   const shutdown = async () => {
     await server.close();

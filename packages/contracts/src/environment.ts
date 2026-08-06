@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const optionalUrl = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().url().optional(),
+);
+const optionalNonEmptyString = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.string().min(1).optional(),
+);
+
 const environmentSchema = z
   .object({
     NODE_ENV: z
@@ -41,6 +50,9 @@ const environmentSchema = z
     OCR_PYTHON_EXECUTABLE: z.string().min(1).optional(),
     DELETION_RECOVERY_DAYS: z.coerce.number().int().min(1).max(365).optional(),
     BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).optional(),
+    SENTRY_DSN: optionalUrl,
+    OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
+    OTEL_EXPORTER_OTLP_HEADERS: optionalNonEmptyString,
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && value.LOCAL_ENGINEERING_MODE) {
