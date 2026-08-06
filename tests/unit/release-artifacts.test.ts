@@ -75,4 +75,19 @@ describe("release artifacts", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("requires every preflight evidence artifact at the ship gate", () => {
+    const preflight = readFileSync(path.join(root, "PREFLIGHT.md"), "utf8");
+    const readiness = readFileSync(
+      path.join(root, "scripts/production-readiness-check.sh"),
+      "utf8",
+    );
+    const evidence = preflight.match(
+      /## Required evidence files\s+([\s\S]*?)\s+PREFLIGHT-TABLE-BEGIN/u,
+    )?.[1];
+    expect(evidence).toBeDefined();
+    for (const match of evidence?.matchAll(/- (compliance\/evidence\/\S+)/gu) ??
+      [])
+      expect(readiness).toContain(match[1]);
+  });
 });

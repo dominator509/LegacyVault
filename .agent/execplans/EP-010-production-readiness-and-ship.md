@@ -61,14 +61,14 @@ The verify sentinel is observed in this session, changed paths match this plan, 
 Re-enter from the first unchecked milestone after verifying the previous checkpoint. Use green tags and the rollback ladder. Never cross a completed node tag.
 
 # 11. Progress
-- [ ] M1 Implement bounded scope
+- [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- The production-readiness script checked only seven of the ten evidence artifacts named by preflight. A regression test now derives the complete required list from `PREFLIGHT.md` and prevents drift.
 
 # 13. Decision Log
-- None recorded.
+- ADR-009 continues only independent ship-gate and handoff work while preserving every external blocker and forbidding a release tag.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.

@@ -457,3 +457,8 @@
 2026-08-06T14:20:55Z | codex | EP-009 | EXTERNAL_DEFERRED | M2_verify_green_tag_GHCR_signing_and_named_Fly_staging_release_remain_external
 2026-08-06T14:20:55Z | codex | EP-009 | CONTINUATION_PASS | unit_58_integration_72_e2e_6_contract_39_operations_1727_cases_build_security_audit_smoke_migration_restore_and_four_local_OCI_targets_ok
 2026-08-06T14:20:55Z | codex | EP-009 | HEARTBEAT | targeted_key_store_concurrency_fix_removed_creation_lock_from_read_path_DeepSeek_live_fire_and_k6_50VUs_250_iterations_p95_264.20ms_ok
+2026-08-06T14:23:57Z | codex | EP-009 | LEASE_RELEASE | engineering_checkpoint_complete_exact_node_verify_and_staging_release_externally_blocked_no_green_tag
+2026-08-06T14:23:57Z | codex | EP-009 | SCHEDULER | NEXT_EP-000_due_to_preserved_external_release_blockers
+2026-08-06T14:29:33Z | codex | EP-010 | LEASE | explicit_implementation_continuation_ship_gate_and_handoff_ADR009
+2026-08-06T14:32:16Z | codex | EP-010 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
+2026-08-06T14:32:16Z | codex | EP-010 | HEARTBEAT | fourteen_outcome_matrix_full_evidence_filename_gate_release_instructions_and_fail_closed_status_materialized
