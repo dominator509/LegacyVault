@@ -115,6 +115,9 @@ importers:
       '@legacy/documents':
         specifier: workspace:*
         version: link:../../packages/documents
+      '@legacy/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@legacy/reports':
         specifier: workspace:*
         version: link:../../packages/reports

@@ -66,6 +66,19 @@ if (
   );
 }
 
+const repositorySource = readFileSync(
+  "packages/database/src/repository.ts",
+  "utf8",
+);
+if (
+  !repositorySource.includes("payload_encrypted") ||
+  /insert into reports[^\n]+claims[^\n]+JSON\.stringify\(input\.claims\)/u.test(
+    repositorySource,
+  )
+) {
+  failures.push("report persistence is not confined to encrypted payloads");
+}
+
 if (failures.length > 0) {
   for (const failure of failures)
     process.stderr.write(`security: ${failure}\n`);

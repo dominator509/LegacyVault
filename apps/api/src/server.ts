@@ -16,7 +16,7 @@ import type { StartedPortableExport } from "@legacy/database/repository";
 import type { StartedDocumentProcessing } from "@legacy/database/repository";
 import type { ConfirmedPrivacyDeletion } from "@legacy/database/repository";
 import type { CancelledPrivacyDeletion } from "@legacy/database/repository";
-import type { RecordCategory } from "@legacy/domain";
+import type { RecordCategory, ReportKind } from "@legacy/domain";
 
 export interface ServerDependencies {
   repository: VaultRepository;
@@ -51,8 +51,9 @@ export interface ServerDependencies {
   ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
   createReport?: (
     identity: AuthenticatedTenantIdentity,
-    kind: "family-emergency-guide" | "executor-preparation-packet",
-  ) => Promise<{ id: string; kind: string; version: number }>;
+    kind: ReportKind,
+    idempotencyKey: string,
+  ) => Promise<unknown>;
   createCheckout?: (
     identity: AuthenticatedTenantIdentity,
     idempotencyKey: string,
@@ -64,6 +65,7 @@ export interface ServerDependencies {
       originalSha256: string;
       mediaType: string;
       maximumBytes: number;
+      expiresAt?: string;
     },
   ) => Promise<{
     document: { id: string; status: string; version: number };

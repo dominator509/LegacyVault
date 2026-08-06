@@ -188,3 +188,8 @@
 2026-08-06T00:59:35Z | codex | EP-004 | SIG | proposed_silent_delayed_job_removal_fallback_rejected_as_destructive_race_risk_before_file_change
 2026-08-06T00:59:35Z | codex | EP-004 | HYPOTHESIS | retain_strict_queue_removal_error_propagation_while_durable_cancelled_execution_status_remains_the_worker_fail_closed_authority
 2026-08-06T00:59:35Z | codex | EP-004 | HEARTBEAT | privacy_request_self_subject_defense_in_depth_focused_API_and_deletion_13_tests_lint_security_ok_credential_ignored_untracked
+2026-08-06T01:23:01Z | codex | EP-004 | SIG | typecheck_TS2307_worker_missing_direct_domain_workspace_dependency_and_application_runtime_report_test_still_expected_removed_synchronous_signature
+2026-08-06T01:23:01Z | codex | EP-004 | HYPOTHESIS | declare_existing_reviewed_domain_workspace_boundary_refresh_lock_and_update_integration_to_execute_and_open_the_queued_encrypted_report
+2026-08-06T01:23:01Z | codex | EP-004 | SIG | focused_annual_review_expected_random_fixture_creation_order_while_repository_deliberately_orders_facts_by_field_and_id
+2026-08-06T01:23:01Z | codex | EP-004 | HYPOTHESIS | compare_expected_finding_ids_in_the_same_deterministic_field_and_id_order_without_weakening_payload_assertions
+2026-08-06T01:23:01Z | codex | EP-004 | HEARTBEAT | queued_envelope_encrypted_reports_deterministic_annual_review_stale_contradiction_missing_and_document_expiry_findings_real_expiration_API_and_PostgreSQL_path_worker_ready_annual_review_document_process_privacy_delete_privacy_export_report_generate_unit_37_integration_46_e2e_2_live_fire_2_build_format_security_audit_smoke_ok

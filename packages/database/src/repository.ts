@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
+import type { ReportKind } from "@legacy/domain";
 import { createDatabasePool } from "./client.js";
 
 export interface TenantContext {
@@ -69,9 +70,24 @@ export interface EncryptedFactForReport {
   evidenceIds: string[];
   confidence?: number;
   sensitivity: string;
-  confirmedBy: string;
-  confirmedAt: string;
+  status: "candidate" | "confirmed" | "rejected" | "disputed";
+  confirmedBy?: string;
+  confirmedAt?: string;
+  lastReviewedAt?: string;
   version: number;
+}
+export interface StartedReport {
+  report: { id: string; kind: ReportKind; status: "pending"; version: number };
+  workflow: { id: string; status: "pending"; version: number };
+}
+export interface ReportBuildInput {
+  reportId: string;
+  workflowId: string;
+  kind: ReportKind;
+  status: string;
+  requestedAt: string;
+  facts: EncryptedFactForReport[];
+  documents: readonly { id: string; expiresAt?: string }[];
 }
 export interface DocumentUploadRecord {
   id: string;
@@ -232,75 +248,168 @@ export class VaultRepository {
     });
   }
 
-  async listConfirmedFactsForReport(
+  async startReport(
     context: TenantContext,
-  ): Promise<EncryptedFactForReport[]> {
+    input: {
+      idempotencyKey: string;
+      kind: ReportKind;
+      requestedAt: string;
+    },
+  ): Promise<StartedReport> {
     return this.withTenant(context, async (client) => {
-      const result = await client.query<{
+      const reportId = randomUUID();
+      const workflowId = randomUUID();
+      const reportResult = await client.query<{
+        id: string;
+        kind: ReportKind;
+        status: "pending";
+        version: number;
+      }>(
+        "insert into reports(id,organization_id,household_id,kind,workflow_id,status,generated_at,claims,source_fact_versions) values ($1,$2,$3,$4,$5,'pending',$6,'[]','{}') returning id,kind,status,version",
+        [
+          reportId,
+          context.organizationId,
+          context.householdId,
+          input.kind,
+          workflowId,
+          input.requestedAt,
+        ],
+      );
+      const workflowResult = await client.query<{
+        id: string;
+        status: "pending";
+        version: number;
+      }>(
+        "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,$4,$5,'pending','[]','collect','Report',$6) returning id,status,version",
+        [
+          workflowId,
+          context.organizationId,
+          context.householdId,
+          input.kind === "annual-review" ? "annual-review" : "report",
+          `report:${input.idempotencyKey}`,
+          reportId,
+        ],
+      );
+      const report = reportResult.rows[0];
+      const workflow = workflowResult.rows[0];
+      if (!report || !workflow)
+        throw new Error("report workflow was not persisted");
+      return { report, workflow };
+    });
+  }
+
+  async getReportBuildInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<ReportBuildInput> {
+    return this.withTenant(context, async (client) => {
+      const reportResult = await client.query<{
+        id: string;
+        workflow_id: string;
+        kind: ReportKind;
+        status: string;
+        generated_at: Date;
+      }>(
+        "select r.id,r.workflow_id,r.kind,r.status,r.generated_at from reports r join workflow_runs w on w.id=r.workflow_id where r.workflow_id=$1 and w.subject_type='Report' and w.subject_id=r.id",
+        [workflowId],
+      );
+      const report = reportResult.rows[0];
+      if (!report) throw new Error("report workflow is unavailable");
+      const factResult = await client.query<{
         id: string;
         field_key: string;
         typed_value_encrypted: Buffer;
         key_version: number;
+        status: EncryptedFactForReport["status"];
         source_type: string;
         source_id: string;
         evidence_ids: string[];
         confidence: string | null;
         sensitivity: string;
-        confirmed_by: string;
-        confirmed_at: Date;
+        confirmed_by: string | null;
+        confirmed_at: Date | null;
+        last_reviewed_at: Date | null;
         version: number;
       }>(
-        "select id,field_key,typed_value_encrypted,key_version,source_type,source_id,evidence_ids,confidence,sensitivity,confirmed_by,confirmed_at,version from facts where status='confirmed' order by field_key,id",
+        "select id,field_key,typed_value_encrypted,key_version,status,source_type,source_id,evidence_ids,confidence,sensitivity,confirmed_by,confirmed_at,last_reviewed_at,version from facts where status<>'rejected' order by field_key,id",
       );
-      return result.rows.map((row) => ({
-        id: row.id,
-        fieldKey: row.field_key,
-        ciphertext: new Uint8Array(row.typed_value_encrypted),
-        keyVersion: row.key_version,
-        sourceType: row.source_type,
-        sourceId: row.source_id,
-        evidenceIds: row.evidence_ids,
-        ...(row.confidence === null
-          ? {}
-          : { confidence: Number(row.confidence) }),
-        sensitivity: row.sensitivity,
-        confirmedBy: row.confirmed_by,
-        confirmedAt: row.confirmed_at.toISOString(),
-        version: row.version,
-      }));
+      const documentResult = await client.query<{
+        id: string;
+        expires_at: Date | null;
+      }>(
+        "select id,expires_at from documents where status<>'deleted' order by id",
+      );
+      return {
+        reportId: report.id,
+        workflowId: report.workflow_id,
+        kind: report.kind,
+        status: report.status,
+        requestedAt: report.generated_at.toISOString(),
+        facts: factResult.rows.map((fact) => ({
+          id: fact.id,
+          fieldKey: fact.field_key,
+          ciphertext: new Uint8Array(fact.typed_value_encrypted),
+          keyVersion: fact.key_version,
+          status: fact.status,
+          sourceType: fact.source_type,
+          sourceId: fact.source_id,
+          evidenceIds: fact.evidence_ids,
+          ...(fact.confidence === null
+            ? {}
+            : { confidence: Number(fact.confidence) }),
+          sensitivity: fact.sensitivity,
+          ...(fact.confirmed_by ? { confirmedBy: fact.confirmed_by } : {}),
+          ...(fact.confirmed_at
+            ? { confirmedAt: fact.confirmed_at.toISOString() }
+            : {}),
+          ...(fact.last_reviewed_at
+            ? { lastReviewedAt: fact.last_reviewed_at.toISOString() }
+            : {}),
+          version: fact.version,
+        })),
+        documents: documentResult.rows.map((document) => ({
+          id: document.id,
+          ...(document.expires_at
+            ? { expiresAt: document.expires_at.toISOString() }
+            : {}),
+        })),
+      };
     });
   }
 
-  async persistReport(
+  async completeReport(
     context: TenantContext,
     input: {
-      id: string;
-      kind: string;
+      reportId: string;
+      workflowId: string;
       generatedAt: string;
-      claims: unknown;
-      sourceFactVersions: unknown;
+      payloadEncrypted: Uint8Array;
+      encryptionKeyVersion: number;
     },
-  ): Promise<{ id: string; kind: string; version: number }> {
-    return this.withTenant(context, async (client) => {
-      const result = await client.query<{
-        id: string;
-        kind: string;
-        version: number;
-      }>(
-        "insert into reports(id,organization_id,household_id,kind,generated_at,claims,source_fact_versions) values ($1,$2,$3,$4,$5,$6,$7) returning id,kind,version",
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      const report = await client.query(
+        "update reports set status='completed',generated_at=$1,completed_at=$1,payload_encrypted=$2,encryption_key_version=$3,version=version+1 where id=$4 and workflow_id=$5 and status='pending'",
         [
-          input.id,
-          context.organizationId,
-          context.householdId,
-          input.kind,
           input.generatedAt,
-          JSON.stringify(input.claims),
-          JSON.stringify(input.sourceFactVersions),
+          Buffer.from(input.payloadEncrypted),
+          input.encryptionKeyVersion,
+          input.reportId,
+          input.workflowId,
         ],
       );
-      const row = result.rows[0];
-      if (!row) throw new Error("report was not persisted");
-      return row;
+      if (report.rowCount !== 1) {
+        const existing = await client.query(
+          "select 1 from reports where id=$1 and workflow_id=$2 and status='completed'",
+          [input.reportId, input.workflowId],
+        );
+        if (existing.rowCount !== 1)
+          throw new Error("report completion conflict");
+      }
+      await client.query(
+        "update workflow_runs set status='completed',completed_steps='[\"collect\",\"generate\",\"store\"]',next_step=null,last_error_class=null,version=version+1 where id=$1 and status<>'completed'",
+        [input.workflowId],
+      );
     });
   }
 
@@ -343,6 +452,7 @@ export class VaultRepository {
       encryptionKeyVersion: number;
       maximumBytes: number;
       idempotencyKey: string;
+      expiresAt?: string;
     },
   ): Promise<DocumentUploadRecord> {
     return this.withTenant(context, async (client) => {
@@ -352,6 +462,7 @@ export class VaultRepository {
             originalSha256: input.originalSha256,
             mediaType: input.mediaType,
             maximumBytes: input.maximumBytes,
+            expiresAt: input.expiresAt ?? null,
           }),
         )
         .digest("hex");
@@ -380,7 +491,7 @@ export class VaultRepository {
         documentId = replayId;
       } else {
         await client.query(
-          "insert into documents(id,organization_id,household_id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes) values ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9)",
+          "insert into documents(id,organization_id,household_id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,expires_at) values ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10)",
           [
             input.id,
             context.organizationId,
@@ -391,6 +502,7 @@ export class VaultRepository {
             input.encryptionKeyVersion,
             JSON.stringify(input.wrappedDataKey),
             input.maximumBytes,
+            input.expiresAt ?? null,
           ],
         );
         await client.query(

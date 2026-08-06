@@ -94,6 +94,7 @@ export const documents = pgTable(
     uploadedAt: timestamp("uploaded_at", { withTimezone: true }),
     processedAt: timestamp("processed_at", { withTimezone: true }),
     lastErrorClass: text("last_error_class"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
     ...versioned,
   },
   (table) => [uniqueIndex("documents_object_key_unique").on(table.objectKey)],
@@ -163,9 +164,14 @@ export const reports = pgTable("reports", {
   id: uuid("id").primaryKey(),
   ...tenant,
   kind: text("kind").notNull(),
+  workflowId: uuid("workflow_id"),
+  status: text("status").notNull(),
   generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   claims: jsonb("claims").notNull(),
   sourceFactVersions: jsonb("source_fact_versions").notNull(),
+  payloadEncrypted: bytea("payload_encrypted"),
+  encryptionKeyVersion: integer("encryption_key_version"),
   ...versioned,
 });
 export const exports = pgTable("exports", {

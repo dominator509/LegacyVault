@@ -30,6 +30,7 @@ const authorizationScopes: {
 let observedExportKey: Uint8Array | undefined;
 let observedManualExtraction: unknown;
 let observedAiInterview: unknown;
+let observedDocumentUpload: unknown;
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
@@ -60,14 +61,25 @@ const server = buildServer({
     keyVersion: 1,
   }),
   createReport: async (_resolved, kind) => ({
-    id: randomUUID(),
-    kind,
-    version: 1,
+    report: { id: randomUUID(), kind, status: "pending", version: 1 },
+    workflow: { id: randomUUID(), status: "pending", version: 1 },
   }),
   createCheckout: async () => ({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
   }),
+  startDocumentUpload: async (_resolved, input) => {
+    observedDocumentUpload = input;
+    return {
+      document: { id: randomUUID(), status: "pending", version: 1 },
+      encryption: {
+        algorithm: "A256GCM" as const,
+        keyBase64: Buffer.alloc(32, 7).toString("base64"),
+        keyVersion: 1,
+        purpose: "document-original",
+      },
+    };
+  },
   completeManualDocumentExtraction: async (_resolved, input) => {
     observedManualExtraction = input;
     return {
@@ -454,10 +466,14 @@ describe("vault API persistence", () => {
       headers: { "idempotency-key": key },
       payload: { kind: "family-emergency-guide" },
     });
-    expect(created.statusCode).toBe(201);
+    expect(created.statusCode).toBe(202);
     expect(created.json()).toMatchObject({
-      kind: "family-emergency-guide",
-      version: 1,
+      report: {
+        kind: "family-emergency-guide",
+        status: "pending",
+        version: 1,
+      },
+      workflow: { status: "pending", version: 1 },
     });
     const replay = await server.inject({
       method: "POST",
@@ -465,13 +481,49 @@ describe("vault API persistence", () => {
       headers: { "idempotency-key": key },
       payload: { kind: "family-emergency-guide" },
     });
-    expect(replay.statusCode).toBe(201);
+    expect(replay.statusCode).toBe(202);
     expect(replay.json()).toEqual(created.json());
     expect(
       authorizationScopes.filter(
         (scope) => scope.purpose === "vault.report.create",
       ),
     ).toHaveLength(26);
+  });
+
+  it("normalizes document expiration timestamps and rejects missing timezones", async () => {
+    const digest = "a".repeat(64);
+    const invalid = await server.inject({
+      method: "POST",
+      url: "/v1/documents",
+      headers: { "idempotency-key": `document-${randomUUID()}` },
+      payload: {
+        originalSha256: digest,
+        mediaType: "application/pdf",
+        maximumBytes: 1024,
+        expiresAt: "2026-08-20T00:00:00",
+      },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toMatchObject({
+      detail: "expiresAt must be an ISO 8601 timestamp with a timezone",
+    });
+
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/documents",
+      headers: { "idempotency-key": `document-${randomUUID()}` },
+      payload: {
+        originalSha256: digest,
+        mediaType: "application/pdf",
+        maximumBytes: 1024,
+        expiresAt: "2026-08-19T17:00:00-07:00",
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.headers["cache-control"]).toBe("no-store");
+    expect(observedDocumentUpload).toMatchObject({
+      expiresAt: "2026-08-20T00:00:00.000Z",
+    });
   });
 
   it("authorizes billing checkout from authenticated tenant context", async () => {

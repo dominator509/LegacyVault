@@ -112,11 +112,30 @@ export interface ReportClaim {
   renderedValue: string;
   status: "confirmed" | "missing" | "disputed";
 }
+export type ReportKind =
+  | "life-inventory"
+  | "family-emergency-guide"
+  | "executor-preparation-packet"
+  | "beneficiary-review-checklist"
+  | "document-gap-report"
+  | "household-continuity-guide"
+  | "annual-review";
+export interface AnnualReviewFindings {
+  staleFactIds: readonly Identifier[];
+  expiringDocumentIds: readonly Identifier[];
+  contradictions: readonly {
+    fieldKey: string;
+    factIds: readonly Identifier[];
+  }[];
+}
 export interface Report extends TenantEntity {
-  kind: "family-emergency-guide" | "executor-preparation-packet";
+  kind: ReportKind;
   generatedAt: IsoDateTime;
   claims: readonly ReportClaim[];
   sourceFactVersions: Readonly<Record<Identifier, number>>;
+  missingCategories?: readonly RecordCategory[];
+  notices?: readonly string[];
+  reviewFindings?: AnnualReviewFindings;
 }
 export type EmergencyAccessStatus =
   "requested" | "approved" | "denied" | "delayed" | "released" | "revoked";

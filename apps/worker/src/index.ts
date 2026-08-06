@@ -15,6 +15,7 @@ import {
   type PortableExportBuildInput,
   type PrivacyDeletionInput,
   type PrivacyDeletionProgress,
+  type ReportBuildInput,
   type TenantContext,
 } from "@legacy/database/repository";
 import {
@@ -29,9 +30,16 @@ import {
 } from "@legacy/documents";
 import { loadEnvironment } from "@legacy/contracts/environment";
 import {
+  canonicalReportValue,
   createPortableExport,
+  generateReport,
   type PortableExportEntry,
 } from "@legacy/reports";
+import {
+  allRecordCategories,
+  recordCategoryFromFieldKey,
+  type CandidateFact,
+} from "@legacy/domain";
 
 export type WorkflowJobName =
   | "document-process"
@@ -89,6 +97,23 @@ export interface PrivacyDeletionRepository {
       backupRetentionDays: number;
     },
   ): Promise<PrivacyDeletionProgress>;
+}
+
+export interface ReportGenerationRepository {
+  getReportBuildInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<ReportBuildInput>;
+  completeReport(
+    context: TenantContext,
+    input: {
+      reportId: string;
+      workflowId: string;
+      generatedAt: string;
+      payloadEncrypted: Uint8Array;
+      encryptionKeyVersion: number;
+    },
+  ): Promise<void>;
 }
 
 export interface DocumentProcessingRepository {
@@ -293,6 +318,162 @@ export function createPrivacyDeletionWorkflowHandler(input: {
       completedAt: now.toISOString(),
       backupRetentionDays: input.backupRetentionDays,
     });
+  };
+}
+
+export function createReportGenerationWorkflowHandler(input: {
+  repository: ReportGenerationRepository;
+  householdKeyStore: PostgresHouseholdKeyStore;
+  now?: () => Date;
+}): WorkflowHandler {
+  return async (data) => {
+    const context = {
+      organizationId: data.organizationId,
+      householdId: data.householdId,
+      actorId: data.actorId,
+    };
+    const build = await input.repository.getReportBuildInput(
+      context,
+      data.workflowId,
+    );
+    if (build.status === "completed") return;
+    const householdKey =
+      await input.householdKeyStore.getOrCreateActiveKey(context);
+    const openedValues: Uint8Array[] = [];
+    let serialized: Buffer | undefined;
+    let encryptedPayload: Buffer | undefined;
+    try {
+      const facts: CandidateFact[] = build.facts.map((fact) => {
+        const opened = decryptEnvelope(
+          storedEnvelope(
+            JSON.parse(Buffer.from(fact.ciphertext).toString("utf8")),
+          ),
+          householdKey.plaintextKey,
+          {
+            organizationId: context.organizationId,
+            householdId: context.householdId,
+            recordId: fact.id,
+            purpose: `fact-value:${fact.fieldKey}`,
+            keyVersion: fact.keyVersion,
+          },
+        );
+        openedValues.push(opened);
+        return {
+          id: fact.id,
+          organizationId: context.organizationId,
+          householdId: context.householdId,
+          fieldKey: fact.fieldKey,
+          typedValue: JSON.parse(Buffer.from(opened).toString("utf8")),
+          status: fact.status,
+          sourceType: fact.sourceType as CandidateFact["sourceType"],
+          sourceId: fact.sourceId,
+          evidenceIds: fact.evidenceIds,
+          ...(fact.confidence === undefined
+            ? {}
+            : { confidence: fact.confidence }),
+          sensitivity: fact.sensitivity as CandidateFact["sensitivity"],
+          ...(fact.confirmedBy ? { confirmedBy: fact.confirmedBy } : {}),
+          ...(fact.confirmedAt ? { confirmedAt: fact.confirmedAt } : {}),
+          ...(fact.lastReviewedAt
+            ? { lastReviewedAt: fact.lastReviewedAt }
+            : {}),
+          version: fact.version,
+        };
+      });
+      const confirmedCategories = new Set(
+        facts
+          .filter((fact) => fact.status === "confirmed")
+          .map((fact) => recordCategoryFromFieldKey(fact.fieldKey)),
+      );
+      const missingCategories = allRecordCategories.filter(
+        (category) => !confirmedCategories.has(category),
+      );
+      const notices = [
+        ...(facts.some((fact) => fact.status !== "confirmed")
+          ? ["unconfirmed-information-present"]
+          : []),
+        ...(missingCategories.length > 0
+          ? ["missing-information-present"]
+          : []),
+      ];
+      const generatedAt = input.now?.() ?? new Date();
+      const reviewThreshold = generatedAt.getTime() - 365 * 86_400_000;
+      const expirationThreshold = generatedAt.getTime() + 90 * 86_400_000;
+      const confirmedByField = new Map<string, CandidateFact[]>();
+      for (const fact of facts.filter(
+        (entry) => entry.status === "confirmed",
+      )) {
+        const group = confirmedByField.get(fact.fieldKey) ?? [];
+        group.push(fact);
+        confirmedByField.set(fact.fieldKey, group);
+      }
+      const contradictions = [...confirmedByField.entries()].flatMap(
+        ([fieldKey, fieldFacts]) =>
+          new Set(
+            fieldFacts.map((fact) => canonicalReportValue(fact.typedValue)),
+          ).size > 1
+            ? [{ fieldKey, factIds: fieldFacts.map((fact) => fact.id) }]
+            : [],
+      );
+      const reviewFindings =
+        build.kind === "annual-review"
+          ? {
+              staleFactIds: facts
+                .filter((fact) => {
+                  if (fact.status !== "confirmed") return false;
+                  const reviewedAt = fact.lastReviewedAt ?? fact.confirmedAt;
+                  return reviewedAt
+                    ? Date.parse(reviewedAt) <= reviewThreshold
+                    : true;
+                })
+                .map((fact) => fact.id),
+              expiringDocumentIds: build.documents
+                .filter(
+                  (document) =>
+                    document.expiresAt &&
+                    Date.parse(document.expiresAt) <= expirationThreshold,
+                )
+                .map((document) => document.id),
+              contradictions,
+            }
+          : undefined;
+      const report = generateReport({
+        id: build.reportId,
+        organizationId: context.organizationId,
+        householdId: context.householdId,
+        kind: build.kind,
+        generatedAt: generatedAt.toISOString(),
+        facts,
+        missingCategories,
+        notices,
+        ...(reviewFindings ? { reviewFindings } : {}),
+      });
+      serialized = Buffer.from(canonicalReportValue(report), "utf8");
+      encryptedPayload = Buffer.from(
+        JSON.stringify(
+          encryptEnvelope(serialized, householdKey.plaintextKey, {
+            organizationId: context.organizationId,
+            householdId: context.householdId,
+            recordId: build.reportId,
+            purpose: `report-payload:${build.kind}`,
+            keyVersion: householdKey.keyVersion,
+          }),
+        ),
+        "utf8",
+      );
+      await input.repository.completeReport(context, {
+        reportId: build.reportId,
+        workflowId: build.workflowId,
+        generatedAt: generatedAt.toISOString(),
+        payloadEncrypted: encryptedPayload,
+        encryptionKeyVersion: householdKey.keyVersion,
+      });
+    } finally {
+      for (const opened of openedValues) opened.fill(0);
+      serialized?.fill(0);
+      encryptedPayload?.fill(0);
+      householdKey.plaintextKey.fill(0);
+    }
   };
 }
 
@@ -720,6 +901,10 @@ async function main(): Promise<void> {
     repository,
     backupRetentionDays: environment.BACKUP_RETENTION_DAYS ?? 35,
   });
+  const reportGenerate = createReportGenerationWorkflowHandler({
+    repository,
+    householdKeyStore,
+  });
   const worker = createWorkflowWorker(
     environment.REDIS_URL,
     {
@@ -735,6 +920,8 @@ async function main(): Promise<void> {
         signingKeyPkcs8Base64: environment.EXPORT_SIGNING_KEY,
       }),
       "privacy-delete": privacyDelete,
+      "report-generate": reportGenerate,
+      "annual-review": reportGenerate,
     },
     environment.WORKFLOW_QUEUE_NAME,
   );
@@ -750,7 +937,13 @@ async function main(): Promise<void> {
     JSON.stringify({
       service: "worker",
       status: "ready",
-      handlers: ["document-process", "privacy-delete", "privacy-export"],
+      handlers: [
+        "annual-review",
+        "document-process",
+        "privacy-delete",
+        "privacy-export",
+        "report-generate",
+      ],
     }) + "\n",
   );
 }

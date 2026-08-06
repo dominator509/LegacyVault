@@ -15,6 +15,7 @@
     "@legacy/crypto": "workspace:*",
     "@legacy/database": "workspace:*",
     "@legacy/documents": "workspace:*",
+    "@legacy/domain": "workspace:*",
     "@legacy/reports": "workspace:*",
     "bullmq": "6.0.8",
     "ioredis": "6.0.0"

@@ -14,6 +14,7 @@ import {
 import {
   createDocumentOcrWorkflowHandler,
   createDocumentScanWorkflowHandler,
+  createReportGenerationWorkflowHandler,
 } from "../../apps/worker/src/index.js";
 import {
   decryptEnvelope,
@@ -272,21 +273,85 @@ describe("composed application runtime", () => {
       const report = await runtime.dependencies.createReport?.(
         identity,
         "family-emergency-guide",
+        `runtime-report-${randomUUID()}`,
       );
       expect(report).toMatchObject({
-        kind: "family-emergency-guide",
-        version: 1,
+        report: {
+          kind: "family-emergency-guide",
+          status: "pending",
+          version: 1,
+        },
+        workflow: { status: "pending", version: 1 },
       });
+      const reportStart = report as {
+        report: { id: string };
+        workflow: { id: string };
+      };
+      const reportKeyStore = new PostgresHouseholdKeyStore(
+        environment.DATABASE_URL ?? "",
+        Buffer.from(environment.APP_ENCRYPTION_KEK ?? "", "base64"),
+      );
+      try {
+        const generate = createReportGenerationWorkflowHandler({
+          repository: runtime.dependencies.repository,
+          householdKeyStore: reportKeyStore,
+          now: () => new Date("2026-08-06T00:00:00.000Z"),
+        });
+        await generate({
+          workflowId: reportStart.workflow.id,
+          organizationId,
+          householdId,
+          actorId,
+        });
+      } finally {
+        await reportKeyStore.close();
+      }
       await client.query("begin");
       await client.query(
         "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
         [organizationId, householdId],
       );
       const reportRow = await client.query<{
-        claims: { factId: string; evidenceIds: string[] }[];
-      }>("select claims from reports where id=$1", [report?.id]);
+        status: string;
+        payload_encrypted: Buffer;
+        encryption_key_version: number;
+      }>(
+        "select status,payload_encrypted,encryption_key_version from reports where id=$1",
+        [reportStart.report.id],
+      );
       await client.query("commit");
-      expect(reportRow.rows[0]?.claims).toEqual([
+      expect(reportRow.rows[0]?.status).toBe("completed");
+      const reportEnvelope = JSON.parse(
+        reportRow.rows[0]?.payload_encrypted.toString("utf8") ?? "{}",
+      ) as EncryptedEnvelope;
+      const reportOpenKeyStore = new PostgresHouseholdKeyStore(
+        environment.DATABASE_URL ?? "",
+        Buffer.from(environment.APP_ENCRYPTION_KEK ?? "", "base64"),
+      );
+      const reportHouseholdKey =
+        await reportOpenKeyStore.getOrCreateActiveKey(identity);
+      let reportPayload: Uint8Array | undefined;
+      try {
+        reportPayload = decryptEnvelope(
+          reportEnvelope,
+          reportHouseholdKey.plaintextKey,
+          {
+            organizationId,
+            householdId,
+            recordId: reportStart.report.id,
+            purpose: "report-payload:family-emergency-guide",
+            keyVersion: reportRow.rows[0]?.encryption_key_version ?? 0,
+          },
+        );
+      } finally {
+        reportHouseholdKey.plaintextKey.fill(0);
+        await reportOpenKeyStore.close();
+      }
+      const openedReport = JSON.parse(
+        Buffer.from(reportPayload ?? []).toString("utf8"),
+      ) as { claims: { factId: string; evidenceIds: string[] }[] };
+      reportPayload?.fill(0);
+      expect(openedReport.claims).toEqual([
         expect.objectContaining({
           factId: encrypted?.id,
           evidenceIds: [evidenceId],
@@ -298,6 +363,7 @@ describe("composed application runtime", () => {
         "base64",
       );
       const documentIdempotencyKey = `runtime-document-${randomUUID()}`;
+      const documentExpiresAt = "2026-08-20T00:00:00.000Z";
       const documentUpload = await runtime.dependencies.startDocumentUpload?.(
         identity,
         {
@@ -307,6 +373,7 @@ describe("composed application runtime", () => {
             .digest("hex"),
           mediaType: "image/png",
           maximumBytes: 1024 * 1024,
+          expiresAt: documentExpiresAt,
         },
       );
       expect(documentUpload?.encryption.algorithm).toBe("A256GCM");
@@ -319,6 +386,7 @@ describe("composed application runtime", () => {
             .digest("hex"),
           mediaType: "image/png",
           maximumBytes: 1024 * 1024,
+          expiresAt: documentExpiresAt,
         },
       );
       expect(replayedDocument).toEqual(documentUpload);
@@ -379,8 +447,9 @@ describe("composed application runtime", () => {
         wrapped_data_key: unknown;
         subject_type: string;
         subject_id: string;
+        expires_at: Date;
       }>(
-        "select d.status,d.ciphertext_sha256,d.wrapped_data_key,w.subject_type,w.subject_id from documents d join workflow_runs w on w.subject_id=d.id where d.id=$1",
+        "select d.status,d.ciphertext_sha256,d.wrapped_data_key,d.expires_at,w.subject_type,w.subject_id from documents d join workflow_runs w on w.subject_id=d.id where d.id=$1",
         [documentUpload?.document.id],
       );
       await client.query("commit");
@@ -390,6 +459,9 @@ describe("composed application runtime", () => {
         subject_type: "Document",
         subject_id: documentUpload?.document.id,
       });
+      expect(documentRow.rows[0]?.expires_at.toISOString()).toBe(
+        documentExpiresAt,
+      );
       expect(
         JSON.stringify(documentRow.rows[0]?.wrapped_data_key),
       ).not.toContain(documentUpload?.encryption.keyBase64);

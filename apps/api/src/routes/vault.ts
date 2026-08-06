@@ -14,6 +14,7 @@ import {
   HouseholdSelectionRequiredError,
 } from "@legacy/auth";
 import type { PermissionAction, RecordCategory } from "@legacy/domain";
+import type { ReportKind } from "@legacy/domain";
 import { scanDlp } from "@legacy/ai-gateway";
 
 export type IdentityResolver = (
@@ -139,7 +140,8 @@ export async function registerVaultRoutes(
     ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
     createReport?: (
       identity: AuthenticatedTenantIdentity,
-      kind: "family-emergency-guide" | "executor-preparation-packet",
+      kind: ReportKind,
+      idempotencyKey: string,
     ) => Promise<unknown>;
     createCheckout?: (
       identity: AuthenticatedTenantIdentity,
@@ -152,6 +154,7 @@ export async function registerVaultRoutes(
         originalSha256: string;
         mediaType: string;
         maximumBytes: number;
+        expiresAt?: string;
       },
     ) => Promise<unknown>;
     createDocumentUploadUrl?: (
@@ -376,6 +379,27 @@ export async function registerVaultRoutes(
         "Invalid request",
         "maximumBytes exceeds the service limit",
       );
+    const expiresAtValue = body.expiresAt;
+    let expiresAt: string | undefined;
+    if (expiresAtValue !== undefined) {
+      if (typeof expiresAtValue !== "string")
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "expiresAt must be an ISO 8601 timestamp",
+        );
+      const parsedExpiresAt = new Date(expiresAtValue);
+      if (
+        Number.isNaN(parsedExpiresAt.valueOf()) ||
+        !/[zZ]|[+-]\d{2}:\d{2}$/u.test(expiresAtValue)
+      )
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "expiresAt must be an ISO 8601 timestamp with a timezone",
+        );
+      expiresAt = parsedExpiresAt.toISOString();
+    }
     for (const category of allRecordCategories)
       await dependencies.authorizeIdentity?.(identity, {
         category,
@@ -393,6 +417,7 @@ export async function registerVaultRoutes(
       originalSha256,
       mediaType,
       maximumBytes,
+      ...(expiresAt ? { expiresAt } : {}),
     });
     return reply.header("cache-control", "no-store").code(201).send(started);
   });
@@ -996,8 +1021,15 @@ export async function registerVaultRoutes(
     const body = objectBody(request.body);
     const kind = requiredString(body, "kind");
     if (
-      kind !== "family-emergency-guide" &&
-      kind !== "executor-preparation-packet"
+      ![
+        "life-inventory",
+        "family-emergency-guide",
+        "executor-preparation-packet",
+        "beneficiary-review-checklist",
+        "document-gap-report",
+        "household-continuity-guide",
+        "annual-review",
+      ].includes(kind)
     )
       throw new ApiProblem(400, "Invalid request", "report kind is invalid");
     const key = idempotencyKey(request);
@@ -1010,14 +1042,18 @@ export async function registerVaultRoutes(
       return reply
         .code(reservation.statusCode ?? 409)
         .send(reservation.responseBody ?? { status: "processing" });
-    const report = await dependencies.createReport(identity, kind);
+    const report = await dependencies.createReport(
+      identity,
+      kind as ReportKind,
+      key,
+    );
     await dependencies.repository.completeIdempotency(
       identity,
       key,
-      201,
+      202,
       report,
     );
-    return reply.code(201).send(report);
+    return reply.code(202).send(report);
   });
 
   server.post("/v1/billing/checkout", async (request, reply) => {

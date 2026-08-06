@@ -23,11 +23,9 @@ import {
   z,
 } from "@legacy/ai-gateway";
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
-import { generateReport } from "@legacy/reports";
 import {
   allRecordCategories,
   recordCategoryFromFieldKey,
-  type CandidateFact,
 } from "@legacy/domain";
 import { DocumentObjectStore } from "@legacy/documents";
 import {
@@ -313,58 +311,23 @@ export function createApplicationRuntime(environment: Environment): {
           key.plaintextKey.fill(0);
         }
       },
-      createReport: async (identity, kind) => {
-        const encryptedFacts =
-          await repository.listConfirmedFactsForReport(identity);
-        const householdKey =
-          await householdKeyStore.getOrCreateActiveKey(identity);
-        try {
-          const facts: CandidateFact[] = encryptedFacts.map((fact) => {
-            const envelope = JSON.parse(
-              Buffer.from(fact.ciphertext).toString("utf8"),
-            ) as EncryptedEnvelope;
-            const opened = decryptEnvelope(
-              envelope,
-              householdKey.plaintextKey,
-              {
-                organizationId: identity.organizationId,
-                householdId: identity.householdId,
-                recordId: fact.id,
-                purpose: `fact-value:${fact.fieldKey}`,
-                keyVersion: fact.keyVersion,
-              },
-            );
-            return {
-              id: fact.id,
-              organizationId: identity.organizationId,
-              householdId: identity.householdId,
-              fieldKey: fact.fieldKey,
-              typedValue: JSON.parse(Buffer.from(opened).toString("utf8")),
-              status: "confirmed",
-              sourceType: fact.sourceType as CandidateFact["sourceType"],
-              sourceId: fact.sourceId,
-              evidenceIds: fact.evidenceIds,
-              ...(fact.confidence === undefined
-                ? {}
-                : { confidence: fact.confidence }),
-              sensitivity: fact.sensitivity as CandidateFact["sensitivity"],
-              confirmedBy: fact.confirmedBy,
-              confirmedAt: fact.confirmedAt,
-              version: fact.version,
-            };
-          });
-          const report = generateReport({
-            id: randomUUID(),
+      createReport: async (identity, kind, idempotencyKey) => {
+        const started = await repository.startReport(identity, {
+          idempotencyKey,
+          kind,
+          requestedAt: new Date().toISOString(),
+        });
+        await enqueueWorkflow(
+          workflowQueue,
+          kind === "annual-review" ? "annual-review" : "report-generate",
+          {
+            workflowId: started.workflow.id,
             organizationId: identity.organizationId,
             householdId: identity.householdId,
-            kind,
-            generatedAt: new Date().toISOString(),
-            facts,
-          });
-          return repository.persistReport(identity, report);
-        } finally {
-          householdKey.plaintextKey.fill(0);
-        }
+            actorId: identity.actorId,
+          },
+        );
+        return started;
       },
       createCheckout: (identity, idempotencyKey) =>
         stripe.createCheckout({
@@ -407,6 +370,7 @@ export function createApplicationRuntime(environment: Environment): {
             encryptionKeyVersion: householdKey.keyVersion,
             maximumBytes: input.maximumBytes,
             idempotencyKey: input.idempotencyKey,
+            ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
           });
           const returnedKey =
             record.id === id

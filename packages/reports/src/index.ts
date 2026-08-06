@@ -19,6 +19,9 @@ export function generateReport(input: {
   kind: Report["kind"];
   generatedAt: string;
   facts: readonly CandidateFact[];
+  missingCategories?: Report["missingCategories"];
+  notices?: Report["notices"];
+  reviewFindings?: Report["reviewFindings"];
 }): Report {
   const report: Report = {
     id: input.id,
@@ -30,6 +33,11 @@ export function generateReport(input: {
     sourceFactVersions: Object.fromEntries(
       input.facts.map((fact) => [fact.id, fact.version]),
     ),
+    ...(input.missingCategories
+      ? { missingCategories: input.missingCategories }
+      : {}),
+    ...(input.notices ? { notices: input.notices } : {}),
+    ...(input.reviewFindings ? { reviewFindings: input.reviewFindings } : {}),
     version: 1,
   };
   assertReportProvenance(report);
@@ -79,12 +87,16 @@ interface PortableExportContainer {
   signerPublicKey: string;
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+export function canonicalReportValue(value: unknown): string {
+  if (Array.isArray(value))
+    return `[${value.map(canonicalReportValue).join(",")}]`;
   if (value && typeof value === "object")
     return `{${Object.entries(value as Record<string, unknown>)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .map(
+        ([key, entry]) =>
+          `${JSON.stringify(key)}:${canonicalReportValue(entry)}`,
+      )
       .join(",")}}`;
   return JSON.stringify(value);
 }
@@ -156,7 +168,7 @@ export function createPortableExport(input: {
     entries,
   };
   const envelope = encryptEnvelope(
-    Buffer.from(canonicalJson(inner), "utf8"),
+    Buffer.from(canonicalReportValue(inner), "utf8"),
     input.exportKey,
     exportContext(input.archiveId, input.keyVersion),
   );
@@ -166,17 +178,17 @@ export function createPortableExport(input: {
     createdAt: input.createdAt,
     encryption: "A256GCM",
     keyVersion: input.keyVersion,
-    envelopeSha256: digest(Buffer.from(canonicalJson(envelope), "utf8")),
+    envelopeSha256: digest(Buffer.from(canonicalReportValue(envelope), "utf8")),
   };
   const signer = new ExportManifestSigner(input.signingKeyPkcs8Base64);
-  const manifestBytes = Buffer.from(canonicalJson(manifest), "utf8");
+  const manifestBytes = Buffer.from(canonicalReportValue(manifest), "utf8");
   const container: PortableExportContainer = {
     manifest,
     envelope,
     signature: signer.sign(manifestBytes),
     signerPublicKey: signer.publicKeySpkiBase64(),
   };
-  return Buffer.from(canonicalJson(container), "utf8");
+  return Buffer.from(canonicalReportValue(container), "utf8");
 }
 
 function parseContainer(bytes: Uint8Array): PortableExportContainer {
@@ -204,11 +216,14 @@ export function verifyAndOpenPortableExport(input: {
   )
     throw new PortableExportError("export container metadata is invalid");
   const envelopeDigest = digest(
-    Buffer.from(canonicalJson(container.envelope), "utf8"),
+    Buffer.from(canonicalReportValue(container.envelope), "utf8"),
   );
   if (envelopeDigest !== container.manifest.envelopeSha256)
     throw new PortableExportError("export envelope digest is invalid");
-  const manifestBytes = Buffer.from(canonicalJson(container.manifest), "utf8");
+  const manifestBytes = Buffer.from(
+    canonicalReportValue(container.manifest),
+    "utf8",
+  );
   if (
     !ExportManifestSigner.verify(
       manifestBytes,
