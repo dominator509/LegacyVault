@@ -268,6 +268,61 @@ describe("vault API persistence", () => {
       status: "confirmed",
       version: 2,
     });
+    const disputeKey = `dispute-${randomUUID()}`;
+    const disputed = await server.inject({
+      method: "POST",
+      url: `/v1/facts/${candidate.id}/dispute`,
+      headers: {
+        "idempotency-key": disputeKey,
+        "if-match": "2",
+      },
+    });
+    expect(disputed.statusCode).toBe(200);
+    expect(disputed.json()).toMatchObject({
+      id: candidate.id,
+      status: "disputed",
+      version: 3,
+    });
+    const disputeReplay = await server.inject({
+      method: "POST",
+      url: `/v1/facts/${candidate.id}/dispute`,
+      headers: { "idempotency-key": disputeKey, "if-match": "2" },
+    });
+    expect(disputeReplay.statusCode).toBe(200);
+    expect(disputeReplay.json()).toEqual(disputed.json());
+    const rejectedCreation = await server.inject({
+      method: "POST",
+      url: "/v1/facts",
+      headers: { "idempotency-key": `create-rejected-${randomUUID()}` },
+      payload: { ...payload, sourceId: randomUUID() },
+    });
+    const rejectedCandidate = rejectedCreation.json<{
+      id: string;
+      status: string;
+      version: number;
+    }>();
+    const rejectKey = `reject-${randomUUID()}`;
+    const rejected = await server.inject({
+      method: "POST",
+      url: `/v1/facts/${rejectedCandidate.id}/reject`,
+      headers: {
+        "idempotency-key": rejectKey,
+        "if-match": "1",
+      },
+    });
+    expect(rejected.statusCode).toBe(200);
+    expect(rejected.json()).toMatchObject({
+      id: rejectedCandidate.id,
+      status: "rejected",
+      version: 2,
+    });
+    const rejectReplay = await server.inject({
+      method: "POST",
+      url: `/v1/facts/${rejectedCandidate.id}/reject`,
+      headers: { "idempotency-key": rejectKey, "if-match": "1" },
+    });
+    expect(rejectReplay.statusCode).toBe(200);
+    expect(rejectReplay.json()).toEqual(rejected.json());
     expect(authorizationScopes).toEqual(
       expect.arrayContaining([
         {
@@ -279,6 +334,16 @@ describe("vault API persistence", () => {
           category: "insurance",
           action: "approve",
           purpose: "vault.fact.confirm",
+        },
+        {
+          category: "insurance",
+          action: "approve",
+          purpose: "vault.fact.dispute",
+        },
+        {
+          category: "insurance",
+          action: "approve",
+          purpose: "vault.fact.reject",
         },
       ]),
     );

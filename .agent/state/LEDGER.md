@@ -229,3 +229,11 @@
 2026-08-06T03:06:50Z | codex | EP-004 | HYPOTHESIS | run_the_exact_COMMANDS_declared_formatter_then_rerun_format_type_real_MinIO_and_security_gates
 2026-08-06T03:06:50Z | codex | EP-004 | HEARTBEAT | authorized_no_store_export_status_completed_only_five_minute_S3_download_safe_filename_digest_signer_no_object_key_real_MinIO_round_trip_focused_18_tests_format_type_security_ok
 2026-08-06T03:09:07Z | codex | EP-004 | HEARTBEAT | export_delivery_checkpoint_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:15:26Z | codex | EP-004 | SIG | first_fact_lifecycle_type_TS2304_positiveInteger_not_defined_and_API_dispute_500_while_format_and_security_passed
+2026-08-06T03:15:26Z | codex | EP-004 | HYPOTHESIS | use_the_existing_requiredPositiveInteger_validator_name_then_rerun_type_and_real_PostgreSQL_API_test
+2026-08-06T03:15:26Z | codex | EP-004 | SIG | second_fact_lifecycle_type_TS2345_validator_requires_body_record_and_API_dispute_400
+2026-08-06T03:15:26Z | codex | EP-004 | HYPOTHESIS | match_the_existing_If_Match_header_number_validation_pattern_without_repuposing_the_JSON_body_validator
+2026-08-06T03:15:26Z | codex | EP-004 | SIG | third_fact_lifecycle_API_dispute_500_after_type_passed_due_confirmed_field_database_check
+2026-08-06T03:15:26Z | codex | EP-004 | HYPOTHESIS | clear_the_active_confirmed_by_and_confirmed_at_markers_when_transitioning_a_confirmed_fact_to_disputed
+2026-08-06T03:15:26Z | codex | EP-004 | HEARTBEAT | persisted_category_authorized_idempotent_optimistic_candidate_rejection_and_confirmed_dispute_replay_focused_API_15_type_security_ok
+2026-08-06T03:17:34Z | codex | EP-004 | HEARTBEAT | fact_lifecycle_checkpoint_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

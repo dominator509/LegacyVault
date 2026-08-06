@@ -781,6 +781,8 @@ export async function registerVaultRoutes(
     "/v1/facts/:id/confirm",
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "fact id is invalid");
       const fieldKey = await dependencies.repository.getFactFieldKey(
         identity,
         request.params.id,
@@ -827,6 +829,114 @@ export async function registerVaultRoutes(
         confirmed,
       );
       return reply.send(confirmed);
+    },
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/facts/:id/reject",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "fact id is invalid");
+      const fieldKey = await dependencies.repository.getFactFieldKey(
+        identity,
+        request.params.id,
+      );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: factCategory(fieldKey),
+        action: "approve",
+        purpose: "vault.fact.reject",
+      });
+      const key = idempotencyKey(request);
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        { factId: request.params.id, expectedVersion },
+      );
+      if (reservation.replay) {
+        if (reservation.statusCode === undefined)
+          throw new ApiProblem(
+            409,
+            "Request in progress",
+            "the idempotent request is still processing",
+          );
+        return reply
+          .code(reservation.statusCode)
+          .send(reservation.responseBody);
+      }
+      const rejected = await dependencies.repository.rejectFact(
+        identity,
+        request.params.id,
+        expectedVersion,
+      );
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        200,
+        rejected,
+      );
+      return reply.send(rejected);
+    },
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/facts/:id/dispute",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "fact id is invalid");
+      const fieldKey = await dependencies.repository.getFactFieldKey(
+        identity,
+        request.params.id,
+      );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: factCategory(fieldKey),
+        action: "approve",
+        purpose: "vault.fact.dispute",
+      });
+      const key = idempotencyKey(request);
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        { factId: request.params.id, expectedVersion },
+      );
+      if (reservation.replay) {
+        if (reservation.statusCode === undefined)
+          throw new ApiProblem(
+            409,
+            "Request in progress",
+            "the idempotent request is still processing",
+          );
+        return reply
+          .code(reservation.statusCode)
+          .send(reservation.responseBody);
+      }
+      const disputed = await dependencies.repository.disputeFact(
+        identity,
+        request.params.id,
+        expectedVersion,
+      );
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        200,
+        disputed,
+      );
+      return reply.send(disputed);
     },
   );
 

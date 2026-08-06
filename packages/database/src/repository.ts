@@ -270,6 +270,46 @@ export class VaultRepository {
     });
   }
 
+  async rejectFact(
+    context: TenantContext,
+    factId: string,
+    expectedVersion: number,
+  ): Promise<{ id: string; status: "rejected"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: "rejected";
+        version: number;
+      }>(
+        "update facts set status='rejected',version=version+1 where id=$1 and version=$2 and status='candidate' returning id,status,version",
+        [factId, expectedVersion],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("fact rejection conflict or policy denial");
+      return row;
+    });
+  }
+
+  async disputeFact(
+    context: TenantContext,
+    factId: string,
+    expectedVersion: number,
+  ): Promise<{ id: string; status: "disputed"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: "disputed";
+        version: number;
+      }>(
+        "update facts set status='disputed',confirmed_by=null,confirmed_at=null,version=version+1 where id=$1 and version=$2 and status='confirmed' returning id,status,version",
+        [factId, expectedVersion],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("fact dispute conflict or policy denial");
+      return row;
+    });
+  }
+
   async getFactFieldKey(
     context: TenantContext,
     factId: string,
