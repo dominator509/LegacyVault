@@ -49,6 +49,10 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     input: { fieldKey: string; plaintext: Uint8Array },
   ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+  encryptEmergencyReason?: (
+    identity: AuthenticatedTenantIdentity,
+    plaintext: Uint8Array,
+  ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
   createReport?: (
     identity: AuthenticatedTenantIdentity,
     kind: ReportKind,
@@ -134,6 +138,7 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.confirmPrivacyDeletion ||
       !dependencies.cancelPrivacyDeletion ||
       !dependencies.encryptFactValue ||
+      !dependencies.encryptEmergencyReason ||
       !dependencies.createReport ||
       !dependencies.getReport ||
       !dependencies.createCheckout ||

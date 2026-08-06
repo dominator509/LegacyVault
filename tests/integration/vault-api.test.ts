@@ -584,6 +584,74 @@ describe("vault API persistence", () => {
     });
   });
 
+  it("decides and releases compartmentalized emergency access with optimistic delay enforcement", async () => {
+    const requestedId = randomUUID();
+    const releasableId = randomUUID();
+    const client = createDatabaseClient(databaseUrl);
+    await client.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [identity.organizationId, identity.householdId],
+      );
+      await client.query(
+        "insert into emergency_access_requests(id,organization_id,household_id,requester_id,recipient_membership_id,categories,reason_encrypted,key_version,status,requested_at) values ($1,$2,$3,$4,$5,'[\"insurance\"]',$6,1,'requested',now()),($7,$2,$3,$4,$5,'[\"insurance\"]',$6,1,'delayed',now()-interval '2 hours')",
+        [
+          requestedId,
+          identity.organizationId,
+          identity.householdId,
+          identity.actorId,
+          identity.membershipId,
+          Buffer.from("encrypted-reason"),
+          releasableId,
+        ],
+      );
+      await client.query(
+        "update emergency_access_requests set decision_at=now()-interval '2 hours',release_after=now()-interval '1 hour' where id=$1",
+        [releasableId],
+      );
+      await client.query("commit");
+    } finally {
+      await client.end();
+    }
+    const decided = await server.inject({
+      method: "POST",
+      url: `/v1/emergency-access/${requestedId}/decide`,
+      headers: {
+        "idempotency-key": `emergency-decide-${randomUUID()}`,
+        "if-match": "1",
+      },
+      payload: { decision: "delay", delayHours: 1 },
+    });
+    expect(decided.statusCode).toBe(200);
+    expect(decided.json()).toMatchObject({ status: "delayed", version: 2 });
+    const tooEarly = await server.inject({
+      method: "POST",
+      url: `/v1/emergency-access/${requestedId}/release`,
+      headers: {
+        "idempotency-key": `emergency-release-${randomUUID()}`,
+        "if-match": "2",
+      },
+    });
+    expect(tooEarly.statusCode).toBe(409);
+    const released = await server.inject({
+      method: "POST",
+      url: `/v1/emergency-access/${releasableId}/release`,
+      headers: {
+        "idempotency-key": `emergency-release-${randomUUID()}`,
+        "if-match": "1",
+      },
+    });
+    expect(released.statusCode).toBe(200);
+    expect(released.json()).toMatchObject({ status: "released", version: 2 });
+    expect(authorizationScopes).toContainEqual({
+      category: "insurance",
+      action: "approve",
+      purpose: "vault.emergency-access.decide",
+    });
+  });
+
   it("validates and authorizes manual document extraction without confirming candidates", async () => {
     const documentId = randomUUID();
     const workflowId = randomUUID();

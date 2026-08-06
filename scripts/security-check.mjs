@@ -70,7 +70,6 @@ if (
     "environment contract does not fail closed on production local mode",
   );
 }
-
 const repositorySource = readFileSync(
   "packages/database/src/repository.ts",
   "utf8",
@@ -86,6 +85,14 @@ if (
 
 const runtimeSource = readFileSync("apps/api/src/runtime.ts", "utf8");
 const aiCacheSource = readFileSync("packages/ai-gateway/src/cache.ts", "utf8");
+if (
+  !runtimeSource.includes('purpose: "emergency-access-reason"') ||
+  !repositorySource.includes("reason_encrypted")
+) {
+  failures.push(
+    "emergency access reasons are not confined to encrypted storage",
+  );
+}
 if (
   !runtimeSource.includes('purpose: "ai-exact-cache"') ||
   !runtimeSource.includes("encryptEnvelope(serialized") ||

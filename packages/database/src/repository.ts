@@ -265,6 +265,115 @@ export class VaultRepository {
     });
   }
 
+  async createEmergencyAccessRequest(
+    context: TenantContext,
+    input: {
+      id: string;
+      recipientMembershipId: string;
+      categories: readonly string[];
+      reasonEncrypted: Uint8Array;
+      keyVersion: number;
+      requestedAt: string;
+    },
+  ): Promise<{ id: string; status: "requested"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const recipient = await client.query(
+        "select 1 from memberships where id=$1 and person_id=$2 and active=1 and role='EmergencyRecipient'",
+        [input.recipientMembershipId, context.actorId],
+      );
+      if (recipient.rowCount !== 1)
+        throw new Error("emergency recipient membership is invalid");
+      const result = await client.query<{
+        id: string;
+        status: "requested";
+        version: number;
+      }>(
+        "insert into emergency_access_requests(id,organization_id,household_id,requester_id,recipient_membership_id,categories,reason_encrypted,key_version,status,requested_at) values ($1,$2,$3,$4,$5,$6,$7,$8,'requested',$9) returning id,status,version",
+        [
+          input.id,
+          context.organizationId,
+          context.householdId,
+          context.actorId,
+          input.recipientMembershipId,
+          JSON.stringify(input.categories),
+          Buffer.from(input.reasonEncrypted),
+          input.keyVersion,
+          input.requestedAt,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("emergency request was not persisted");
+      return row;
+    });
+  }
+
+  async getEmergencyAccessCategories(
+    context: TenantContext,
+    requestId: string,
+  ): Promise<string[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{ categories: string[] }>(
+        "select categories from emergency_access_requests where id=$1",
+        [requestId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("emergency access request is unavailable");
+      return row.categories;
+    });
+  }
+
+  async decideEmergencyAccess(
+    context: TenantContext,
+    input: {
+      requestId: string;
+      expectedVersion: number;
+      decision: "deny" | "delay";
+      decisionAt: string;
+      releaseAfter?: string;
+    },
+  ): Promise<{ id: string; status: "denied" | "delayed"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const status = input.decision === "deny" ? "denied" : "delayed";
+      const result = await client.query<{
+        id: string;
+        status: "denied" | "delayed";
+        version: number;
+      }>(
+        "update emergency_access_requests set status=$1,decision_at=$2,release_after=$3,version=version+1 where id=$4 and version=$5 and status='requested' returning id,status,version",
+        [
+          status,
+          input.decisionAt,
+          input.releaseAfter ?? null,
+          input.requestId,
+          input.expectedVersion,
+        ],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("emergency access decision conflict");
+      return row;
+    });
+  }
+
+  async releaseEmergencyAccess(
+    context: TenantContext,
+    input: { requestId: string; expectedVersion: number; releasedAt: string },
+  ): Promise<{ id: string; status: "released"; version: number }> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: "released";
+        version: number;
+      }>(
+        "update emergency_access_requests set status='released',version=version+1 where id=$1 and version=$2 and status='delayed' and release_after<=$3 returning id,status,version",
+        [input.requestId, input.expectedVersion, input.releasedAt],
+      );
+      const row = result.rows[0];
+      if (!row)
+        throw new Error("emergency access release conflict or delay active");
+      return row;
+    });
+  }
+
   async startReport(
     context: TenantContext,
     input: {

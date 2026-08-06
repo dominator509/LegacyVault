@@ -125,5 +125,16 @@ describe("service authorization policy", () => {
         sessionIssuedAt: "2026-08-05T11:00:00.000Z",
       }),
     ).toEqual({ allowed: false, reason: "emergency-release-required" });
+    expect(
+      authorize({
+        role: "EmergencyRecipient",
+        grants: [],
+        category: "insurance",
+        action: "create",
+        purpose: "vault.emergency-access.request",
+        now,
+        sessionIssuedAt: "2026-08-05T11:00:00.000Z",
+      }),
+    ).toEqual({ allowed: true, reason: "allow" });
   });
 });

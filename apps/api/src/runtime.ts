@@ -323,6 +323,26 @@ export function createApplicationRuntime(environment: Environment): {
           key.plaintextKey.fill(0);
         }
       },
+      encryptEmergencyReason: async (identity, plaintext) => {
+        const id = randomUUID();
+        const key = await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          const envelope = encryptEnvelope(plaintext, key.plaintextKey, {
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            recordId: id,
+            purpose: "emergency-access-reason",
+            keyVersion: key.keyVersion,
+          });
+          return {
+            id,
+            ciphertext: Buffer.from(JSON.stringify(envelope), "utf8"),
+            keyVersion: key.keyVersion,
+          };
+        } finally {
+          key.plaintextKey.fill(0);
+        }
+      },
       createReport: async (identity, kind, idempotencyKey) => {
         const started = await repository.startReport(identity, {
           idempotencyKey,

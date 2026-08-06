@@ -96,6 +96,12 @@ export function authorize(
   }
   if (
     request.role === "EmergencyRecipient" &&
+    request.purpose === "vault.emergency-access.request" &&
+    request.action === "create"
+  )
+    return { allowed: true, reason: "allow" };
+  if (
+    request.role === "EmergencyRecipient" &&
     !request.emergencyReleaseCategories?.includes(request.category)
   )
     return { allowed: false, reason: "emergency-release-required" };

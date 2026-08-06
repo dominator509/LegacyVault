@@ -138,6 +138,10 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       input: { fieldKey: string; plaintext: Uint8Array },
     ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+    encryptEmergencyReason?: (
+      identity: AuthenticatedTenantIdentity,
+      plaintext: Uint8Array,
+    ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
     createReport?: (
       identity: AuthenticatedTenantIdentity,
       kind: ReportKind,
@@ -761,6 +765,251 @@ export async function registerVaultRoutes(
         confirmed,
       );
       return reply.send(confirmed);
+    },
+  );
+
+  server.post("/v1/emergency-access", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    const body = objectBody(request.body);
+    const recipientMembershipId = requiredUuid(body, "recipientMembershipId");
+    if (recipientMembershipId !== identity.membershipId)
+      throw new ApiProblem(
+        403,
+        "Access denied",
+        "Emergency access may be requested only for the active membership.",
+      );
+    if (
+      !Array.isArray(body.categories) ||
+      body.categories.length === 0 ||
+      !body.categories.every(
+        (category) =>
+          typeof category === "string" &&
+          allRecordCategories.includes(category as RecordCategory),
+      )
+    )
+      throw new ApiProblem(400, "Invalid request", "categories are invalid");
+    const categories = [...new Set(body.categories as RecordCategory[])].sort();
+    const reason = requiredString(body, "reason");
+    if (Buffer.byteLength(reason) > 2_000)
+      throw new ApiProblem(400, "Invalid request", "reason is too large");
+    const findings = scanDlp(reason);
+    if (findings.length)
+      throw new ApiProblem(
+        400,
+        "Prohibited content",
+        `reason contains prohibited ${findings.join(", ")}`,
+      );
+    for (const category of categories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "create",
+        purpose: "vault.emergency-access.request",
+      });
+    if (!dependencies.encryptEmergencyReason)
+      throw new ApiProblem(
+        503,
+        "Emergency access unavailable",
+        "Emergency access encryption is not configured.",
+      );
+    const key = idempotencyKey(request);
+    const requestShape = { recipientMembershipId, categories, reason };
+    const reservation = await dependencies.repository.reserveIdempotency(
+      identity,
+      key,
+      requestShape,
+    );
+    if (reservation.replay)
+      return reply
+        .code(reservation.statusCode ?? 409)
+        .send(reservation.responseBody ?? { status: "processing" });
+    const plaintext = Buffer.from(reason, "utf8");
+    try {
+      const encrypted = await dependencies.encryptEmergencyReason(
+        identity,
+        plaintext,
+      );
+      const created =
+        await dependencies.repository.createEmergencyAccessRequest(identity, {
+          id: encrypted.id,
+          recipientMembershipId,
+          categories,
+          reasonEncrypted: encrypted.ciphertext,
+          keyVersion: encrypted.keyVersion,
+          requestedAt: new Date().toISOString(),
+        });
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        201,
+        created,
+      );
+      return reply.header("cache-control", "no-store").code(201).send(created);
+    } finally {
+      plaintext.fill(0);
+    }
+  });
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/emergency-access/:id/decide",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "emergency request id is invalid",
+        );
+      const body = objectBody(request.body);
+      const decision = requiredString(body, "decision");
+      if (decision !== "deny" && decision !== "delay")
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "decision must be deny or delay",
+        );
+      const delayHours =
+        decision === "delay" ? requiredPositiveInteger(body, "delayHours") : 0;
+      if (delayHours > 168)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "delayHours exceeds seven days",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const categories =
+        await dependencies.repository.getEmergencyAccessCategories(
+          identity,
+          request.params.id,
+        );
+      for (const category of categories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category: category as RecordCategory,
+          action: "approve",
+          purpose: "vault.emergency-access.decide",
+        });
+      const key = idempotencyKey(request);
+      const requestShape = {
+        requestId: request.params.id,
+        expectedVersion,
+        decision,
+        delayHours,
+      };
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        requestShape,
+      );
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      const decisionAt = new Date();
+      try {
+        const decided = await dependencies.repository.decideEmergencyAccess(
+          identity,
+          {
+            requestId: request.params.id,
+            expectedVersion,
+            decision,
+            decisionAt: decisionAt.toISOString(),
+            ...(decision === "delay"
+              ? {
+                  releaseAfter: new Date(
+                    decisionAt.getTime() + delayHours * 60 * 60 * 1_000,
+                  ).toISOString(),
+                }
+              : {}),
+          },
+        );
+        await dependencies.repository.completeIdempotency(
+          identity,
+          key,
+          200,
+          decided,
+        );
+        return reply.header("cache-control", "no-store").send(decided);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("conflict"))
+          throw new ApiProblem(
+            409,
+            "Emergency access conflict",
+            "The emergency request changed or cannot be decided.",
+          );
+        throw error;
+      }
+    },
+  );
+
+  server.post<{ Params: { id: string } }>(
+    "/v1/emergency-access/:id/release",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "emergency request id is invalid",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const categories =
+        await dependencies.repository.getEmergencyAccessCategories(
+          identity,
+          request.params.id,
+        );
+      for (const category of categories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category: category as RecordCategory,
+          action: "approve",
+          purpose: "vault.emergency-access.release",
+        });
+      const key = idempotencyKey(request);
+      const requestShape = { requestId: request.params.id, expectedVersion };
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        requestShape,
+      );
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      try {
+        const released = await dependencies.repository.releaseEmergencyAccess(
+          identity,
+          {
+            requestId: request.params.id,
+            expectedVersion,
+            releasedAt: new Date().toISOString(),
+          },
+        );
+        await dependencies.repository.completeIdempotency(
+          identity,
+          key,
+          200,
+          released,
+        );
+        return reply.header("cache-control", "no-store").send(released);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("conflict"))
+          throw new ApiProblem(
+            409,
+            "Emergency access conflict",
+            "The release delay remains active or the request changed.",
+          );
+        throw error;
+      }
     },
   );
 
