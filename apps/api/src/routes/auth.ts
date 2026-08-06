@@ -12,6 +12,7 @@ export async function registerAuthRoutes(
   server.route({
     method: ["GET", "POST"],
     url: "/api/auth/*",
+    schema: { hide: true },
     async handler(request, reply) {
       try {
         const url = new URL(request.url, authBaseUrl);

@@ -230,9 +230,29 @@ describe("vault API persistence", () => {
     expect(response.statusCode).toBe(200);
     const specification = response.json<{
       openapi: string;
-      paths: Record<string, unknown>;
+      components?: { schemas?: Record<string, unknown> };
+      paths: Record<
+        string,
+        Record<
+          string,
+          {
+            parameters?: Array<{
+              in?: string;
+              name?: string;
+              required?: boolean;
+            }>;
+            responses?: Record<
+              string,
+              {
+                content?: Record<string, { schema?: { $ref?: string } }>;
+              }
+            >;
+          }
+        >
+      >;
     }>();
     expect(specification.openapi).toBe("3.1.0");
+    expect(specification.components?.schemas).toHaveProperty("ProblemDetails");
     for (const path of [
       "/v1/facts",
       "/v1/documents",
@@ -262,6 +282,21 @@ describe("vault API persistence", () => {
         ],
       },
     });
+    for (const [path, pathItem] of Object.entries(specification.paths)) {
+      const operation = pathItem.post;
+      if (!operation || path === "/v1/billing/webhooks/stripe") continue;
+      const requiredHeaders = operation.parameters
+        ?.filter((parameter) => parameter.in === "header" && parameter.required)
+        .map((parameter) => parameter.name);
+      expect(requiredHeaders, path).toEqual(
+        expect.arrayContaining(["idempotency-key", "if-match"]),
+      );
+      expect(
+        operation.responses?.["400"]?.content?.["application/problem+json"]
+          ?.schema?.$ref,
+        path,
+      ).toBe("#/components/schemas/ProblemDetails");
+    }
   });
 
   it("returns no-store category-scoped facts and secret-free document metadata", async () => {
@@ -336,10 +371,38 @@ describe("vault API persistence", () => {
       evidenceIds: [],
       sensitivity: "sensitive",
     };
+    const malformed = await server.inject({
+      method: "POST",
+      url: "/v1/facts",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": `malformed-${randomUUID()}`,
+        "if-match": "0",
+      },
+      payload: "{not-json",
+    });
+    expect(malformed.statusCode).toBe(400);
+    expect(malformed.headers["content-type"]).toContain(
+      "application/problem+json",
+    );
+    expect(malformed.json()).toMatchObject({
+      title: "Invalid request",
+      detail: "The request could not be parsed.",
+    });
+    const missingVersion = await server.inject({
+      method: "POST",
+      url: "/v1/facts",
+      headers: { "idempotency-key": `missing-version-${randomUUID()}` },
+      payload,
+    });
+    expect(missingVersion.statusCode).toBe(400);
+    expect(missingVersion.headers["content-type"]).toContain(
+      "application/problem+json",
+    );
     const created = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload,
     });
     expect(created.statusCode).toBe(201);
@@ -352,7 +415,7 @@ describe("vault API persistence", () => {
     const replay = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload,
     });
     expect(replay.statusCode).toBe(201);
@@ -397,7 +460,10 @@ describe("vault API persistence", () => {
     const rejectedCreation = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": `create-rejected-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `create-rejected-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: { ...payload, sourceId: randomUUID() },
     });
     const rejectedCandidate = rejectedCreation.json<{
@@ -457,7 +523,10 @@ describe("vault API persistence", () => {
     const otherSubject = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
-      headers: { "idempotency-key": `privacy-other-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `privacy-other-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: { personId: randomUUID(), kind: "deletion" },
     });
     expect(otherSubject.statusCode).toBe(403);
@@ -466,7 +535,7 @@ describe("vault API persistence", () => {
     const created = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload,
     });
     expect(created.statusCode).toBe(202);
@@ -481,7 +550,7 @@ describe("vault API persistence", () => {
     const replay = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload,
     });
     expect(replay.statusCode).toBe(202);
@@ -548,7 +617,7 @@ describe("vault API persistence", () => {
     const mismatched = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload: { personId: payload.personId, kind: "export" },
     });
     expect(mismatched.statusCode).toBe(409);
@@ -597,7 +666,10 @@ describe("vault API persistence", () => {
     const created = await server.inject({
       method: "POST",
       url: "/v1/consents",
-      headers: { "idempotency-key": `consent-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `consent-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: { personId, purpose: "terms", policyVersion: "2026-08-05" },
     });
     expect(created.statusCode).toBe(201);
@@ -637,14 +709,14 @@ describe("vault API persistence", () => {
     const invalid = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload: { ...base, value: "password: supersecret" },
     });
     expect(invalid.statusCode).toBe(400);
     const corrected = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload: {
         ...base,
         value: "Policy reference in locked drawer",
@@ -657,7 +729,10 @@ describe("vault API persistence", () => {
     const rejected = await server.inject({
       method: "POST",
       url: "/v1/facts",
-      headers: { "idempotency-key": `category-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `category-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: {
         fieldKey: "unknown.secret",
         value: "not stored",
@@ -678,7 +753,10 @@ describe("vault API persistence", () => {
     const requested = await server.inject({
       method: "POST",
       url: "/v1/exports",
-      headers: { "idempotency-key": `export-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `export-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: { exportKeyBase64: Buffer.alloc(32, 11).toString("base64") },
     });
     expect(requested.statusCode).toBe(202);
@@ -724,7 +802,7 @@ describe("vault API persistence", () => {
     const created = await server.inject({
       method: "POST",
       url: "/v1/reports",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload: { kind: "family-emergency-guide" },
     });
     expect(created.statusCode).toBe(202);
@@ -739,7 +817,7 @@ describe("vault API persistence", () => {
     const replay = await server.inject({
       method: "POST",
       url: "/v1/reports",
-      headers: { "idempotency-key": key },
+      headers: { "idempotency-key": key, "if-match": "0" },
       payload: { kind: "family-emergency-guide" },
     });
     expect(replay.statusCode).toBe(202);
@@ -782,7 +860,10 @@ describe("vault API persistence", () => {
     const missingConsent = await server.inject({
       method: "POST",
       url: "/v1/documents",
-      headers: { "idempotency-key": `document-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `document-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: {
         originalSha256: digest,
         mediaType: "application/pdf",
@@ -790,13 +871,20 @@ describe("vault API persistence", () => {
       },
     });
     expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.headers["content-type"]).toContain(
+      "application/problem+json",
+    );
     expect(missingConsent.json()).toMatchObject({
-      detail: "documentConsentPolicyVersion is required",
+      title: "Invalid request",
+      detail: "The request does not match the API schema.",
     });
     const invalid = await server.inject({
       method: "POST",
       url: "/v1/documents",
-      headers: { "idempotency-key": `document-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `document-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: {
         originalSha256: digest,
         mediaType: "application/pdf",
@@ -808,13 +896,17 @@ describe("vault API persistence", () => {
     });
     expect(invalid.statusCode).toBe(400);
     expect(invalid.json()).toMatchObject({
-      detail: "expiresAt must be an ISO 8601 timestamp with a timezone",
+      title: "Invalid request",
+      detail: "The request does not match the API schema.",
     });
 
     const created = await server.inject({
       method: "POST",
       url: "/v1/documents",
-      headers: { "idempotency-key": `document-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `document-${randomUUID()}`,
+        "if-match": "0",
+      },
       payload: {
         originalSha256: digest,
         mediaType: "application/pdf",
@@ -834,10 +926,22 @@ describe("vault API persistence", () => {
   });
 
   it("authorizes billing checkout from authenticated tenant context", async () => {
+    const stale = await server.inject({
+      method: "POST",
+      url: "/v1/billing/checkout",
+      headers: {
+        "idempotency-key": `checkout-stale-${randomUUID()}`,
+        "if-match": "1",
+      },
+    });
+    expect(stale.statusCode).toBe(409);
     const checkout = await server.inject({
       method: "POST",
       url: "/v1/billing/checkout",
-      headers: { "idempotency-key": `checkout-${randomUUID()}` },
+      headers: {
+        "idempotency-key": `checkout-${randomUUID()}`,
+        "if-match": "2",
+      },
     });
     expect(checkout.statusCode).toBe(201);
     expect(checkout.json()).toEqual({

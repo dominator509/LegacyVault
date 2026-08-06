@@ -16,6 +16,7 @@ import {
 import type { PermissionAction, RecordCategory } from "@legacy/domain";
 import type { ReportKind } from "@legacy/domain";
 import { scanDlp } from "@legacy/ai-gateway";
+import { standardProblemResponses } from "../openapi.js";
 
 export type IdentityResolver = (
   request: FastifyRequest,
@@ -61,7 +62,7 @@ function idempotencyKey(request: FastifyRequest): string {
   if (
     typeof value !== "string" ||
     value.length < 16 ||
-    value.length > 128 ||
+    value.length > 200 ||
     !/^[A-Za-z0-9._:-]+$/u.test(value)
   )
     throw new ApiProblem(
@@ -74,6 +75,86 @@ function idempotencyKey(request: FastifyRequest): string {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+const creationWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": {
+      type: "string",
+      minLength: 16,
+      maxLength: 200,
+      pattern: "^[A-Za-z0-9._:-]+$",
+    },
+    "if-match": { type: "string", const: "0" },
+  },
+} as const;
+
+const optimisticWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": {
+      type: "string",
+      minLength: 16,
+      maxLength: 200,
+      pattern: "^[A-Za-z0-9._:-]+$",
+    },
+    "if-match": { type: "string", pattern: "^[1-9][0-9]*$" },
+  },
+} as const;
+
+const mutationWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": {
+      type: "string",
+      minLength: 16,
+      maxLength: 200,
+      pattern: "^[A-Za-z0-9._:-]+$",
+    },
+    "if-match": { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+  },
+} as const;
+
+const uuidPathSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
+  properties: { id: { type: "string", format: "uuid" } },
+} as const;
+
+const privacyRequestPathSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["requestId"],
+  properties: { requestId: { type: "string", format: "uuid" } },
+} as const;
+
+function creationVersion(request: FastifyRequest): 0 {
+  if (request.headers["if-match"] !== "0")
+    throw new ApiProblem(
+      400,
+      "Invalid request",
+      "if-match must be 0 when creating a resource",
+    );
+  return 0;
+}
+
+function mutationVersion(request: FastifyRequest): number {
+  const value = Number(request.headers["if-match"]);
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new ApiProblem(
+      400,
+      "Invalid request",
+      "a valid non-negative if-match version is required",
+    );
+  return value;
+}
 
 function requiredUuid(body: Record<string, unknown>, field: string): string {
   const value = requiredString(body, field);
@@ -229,10 +310,29 @@ export async function registerVaultRoutes(
     ) => Promise<unknown>;
   },
 ): Promise<void> {
+  server.addHook("onRoute", (routeOptions) => {
+    if (!routeOptions.url.startsWith("/v1/")) return;
+    routeOptions.schema = {
+      ...routeOptions.schema,
+      response: {
+        ...standardProblemResponses,
+        ...(routeOptions.schema?.response as
+          Record<string, unknown> | undefined),
+      },
+    };
+  });
+
   server.setErrorHandler((error, request, reply) => {
     const message = error instanceof Error ? error.message : "unknown error";
     const schemaValidationFailed =
       typeof error === "object" && error !== null && "validation" in error;
+    const clientRequestFailed =
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      typeof error.statusCode === "number" &&
+      error.statusCode >= 400 &&
+      error.statusCode < 500;
     const problem =
       error instanceof ApiProblem
         ? error
@@ -242,30 +342,36 @@ export async function registerVaultRoutes(
               "Invalid request",
               "The request does not match the API schema.",
             )
-          : error instanceof AuthenticationRequiredError
+          : clientRequestFailed
             ? new ApiProblem(
-                401,
-                "Authentication required",
-                "Authentication is required.",
+                error.statusCode as number,
+                "Invalid request",
+                "The request could not be parsed.",
               )
-            : error instanceof HouseholdSelectionRequiredError
+            : error instanceof AuthenticationRequiredError
               ? new ApiProblem(
-                  409,
-                  "Household selection required",
-                  "Select an accessible household.",
+                  401,
+                  "Authentication required",
+                  "Authentication is required.",
                 )
-              : error instanceof AuthorizationDeniedError
-                ? new ApiProblem(403, "Access denied", "Access is denied.")
-                : new ApiProblem(
-                    message.includes("conflict") ||
-                      message.includes("idempotency")
-                      ? 409
-                      : 500,
-                    message.includes("conflict")
-                      ? "Version conflict"
-                      : "Request failed",
-                    "The request could not be completed.",
-                  );
+              : error instanceof HouseholdSelectionRequiredError
+                ? new ApiProblem(
+                    409,
+                    "Household selection required",
+                    "Select an accessible household.",
+                  )
+                : error instanceof AuthorizationDeniedError
+                  ? new ApiProblem(403, "Access denied", "Access is denied.")
+                  : new ApiProblem(
+                      message.includes("conflict") ||
+                        message.includes("idempotency")
+                        ? 409
+                        : 500,
+                      message.includes("conflict")
+                        ? "Version conflict"
+                        : "Request failed",
+                      "The request could not be completed.",
+                    );
     return reply.code(problem.status).type("application/problem+json").send({
       type: "about:blank",
       title: problem.title,
@@ -323,119 +429,166 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/facts", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    const key = idempotencyKey(request);
-    if (!dependencies.encryptFactValue)
-      throw new ApiProblem(
-        503,
-        "Fact encryption unavailable",
-        "Fact encryption is not configured.",
-      );
-    if (!Object.hasOwn(body, "value"))
-      throw new ApiProblem(400, "Invalid request", "value is required");
-    let plaintext: Buffer;
-    try {
-      const serialized = JSON.stringify(body.value);
-      if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
-        throw new Error("invalid value");
-      const prohibited = scanDlp(serialized).filter(
-        (finding) => finding !== "prompt-injection",
-      );
-      if (prohibited.length)
+  server.post(
+    "/v1/facts",
+    {
+      schema: {
+        tags: ["facts"],
+        summary: "Create an encrypted candidate fact",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "fieldKey",
+            "value",
+            "sourceType",
+            "sourceId",
+            "sensitivity",
+          ],
+          properties: {
+            fieldKey: { type: "string", minLength: 3, maxLength: 200 },
+            value: {},
+            sourceType: {
+              type: "string",
+              enum: ["manual", "document", "interview", "professional"],
+            },
+            sourceId: { type: "string", format: "uuid" },
+            evidenceIds: {
+              type: "array",
+              maxItems: 100,
+              uniqueItems: true,
+              items: { type: "string", format: "uuid" },
+            },
+            confidence: { type: "number", minimum: 0, maximum: 1 },
+            sensitivity: {
+              type: "string",
+              enum: ["standard", "sensitive", "highly-sensitive"],
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      const key = idempotencyKey(request);
+      creationVersion(request);
+      if (!dependencies.encryptFactValue)
         throw new ApiProblem(
-          400,
-          "Prohibited content",
-          `value contains prohibited ${prohibited.join(", ")}`,
+          503,
+          "Fact encryption unavailable",
+          "Fact encryption is not configured.",
         );
-      plaintext = Buffer.from(serialized, "utf8");
-    } catch (error) {
-      if (error instanceof ApiProblem) throw error;
-      throw new ApiProblem(400, "Invalid request", "value is invalid");
-    }
-    const sourceType = requiredString(body, "sourceType");
-    if (
-      !["manual", "document", "interview", "professional"].includes(sourceType)
-    )
-      throw new ApiProblem(400, "Invalid request", "sourceType is invalid");
-    const sensitivity = requiredString(body, "sensitivity");
-    if (!["standard", "sensitive", "highly-sensitive"].includes(sensitivity))
-      throw new ApiProblem(400, "Invalid request", "sensitivity is invalid");
-    if (
-      body.evidenceIds !== undefined &&
-      (!Array.isArray(body.evidenceIds) ||
-        !body.evidenceIds.every(
-          (item) => typeof item === "string" && uuidPattern.test(item),
-        ))
-    )
-      throw new ApiProblem(400, "Invalid request", "evidenceIds are invalid");
-    if (
-      body.confidence !== undefined &&
-      (typeof body.confidence !== "number" ||
-        body.confidence < 0 ||
-        body.confidence > 1)
-    )
-      throw new ApiProblem(400, "Invalid request", "confidence is invalid");
-    const fieldKey = requiredString(body, "fieldKey");
-    const category = factCategory(fieldKey);
-    await dependencies.authorizeIdentity?.(identity, {
-      category,
-      action: "create",
-      purpose: "vault.fact.create",
-    });
-    let encrypted: {
-      id: string;
-      ciphertext: Uint8Array;
-      keyVersion: number;
-    };
-    try {
-      encrypted = await dependencies.encryptFactValue(identity, {
-        fieldKey,
-        plaintext,
+      if (!Object.hasOwn(body, "value"))
+        throw new ApiProblem(400, "Invalid request", "value is required");
+      let plaintext: Buffer;
+      try {
+        const serialized = JSON.stringify(body.value);
+        if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
+          throw new Error("invalid value");
+        const prohibited = scanDlp(serialized).filter(
+          (finding) => finding !== "prompt-injection",
+        );
+        if (prohibited.length)
+          throw new ApiProblem(
+            400,
+            "Prohibited content",
+            `value contains prohibited ${prohibited.join(", ")}`,
+          );
+        plaintext = Buffer.from(serialized, "utf8");
+      } catch (error) {
+        if (error instanceof ApiProblem) throw error;
+        throw new ApiProblem(400, "Invalid request", "value is invalid");
+      }
+      const sourceType = requiredString(body, "sourceType");
+      if (
+        !["manual", "document", "interview", "professional"].includes(
+          sourceType,
+        )
+      )
+        throw new ApiProblem(400, "Invalid request", "sourceType is invalid");
+      const sensitivity = requiredString(body, "sensitivity");
+      if (!["standard", "sensitive", "highly-sensitive"].includes(sensitivity))
+        throw new ApiProblem(400, "Invalid request", "sensitivity is invalid");
+      if (
+        body.evidenceIds !== undefined &&
+        (!Array.isArray(body.evidenceIds) ||
+          !body.evidenceIds.every(
+            (item) => typeof item === "string" && uuidPattern.test(item),
+          ))
+      )
+        throw new ApiProblem(400, "Invalid request", "evidenceIds are invalid");
+      if (
+        body.confidence !== undefined &&
+        (typeof body.confidence !== "number" ||
+          body.confidence < 0 ||
+          body.confidence > 1)
+      )
+        throw new ApiProblem(400, "Invalid request", "confidence is invalid");
+      const fieldKey = requiredString(body, "fieldKey");
+      const category = factCategory(fieldKey);
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "create",
+        purpose: "vault.fact.create",
       });
-    } finally {
-      plaintext.fill(0);
-    }
-    const candidate = {
-      id: encrypted.id,
-      fieldKey,
-      ciphertext: encrypted.ciphertext,
-      keyVersion: encrypted.keyVersion,
-      sourceType,
-      sourceId: requiredUuid(body, "sourceId"),
-      evidenceIds: (body.evidenceIds ?? []) as string[],
-      ...(typeof body.confidence === "number"
-        ? { confidence: body.confidence }
-        : {}),
-      sensitivity,
-    };
-    const reservation = await dependencies.repository.reserveIdempotency(
-      identity,
-      key,
-      body,
-    );
-    if (reservation.replay) {
-      if (reservation.statusCode === undefined)
-        throw new ApiProblem(
-          409,
-          "Request in progress",
-          "the idempotent request is still processing",
-        );
-      return reply.code(reservation.statusCode).send(reservation.responseBody);
-    }
-    const created = await dependencies.repository.createCandidateFact(
-      identity,
-      candidate,
-    );
-    await dependencies.repository.completeIdempotency(
-      identity,
-      key,
-      201,
-      created,
-    );
-    return reply.code(201).send(created);
-  });
+      let encrypted: {
+        id: string;
+        ciphertext: Uint8Array;
+        keyVersion: number;
+      };
+      try {
+        encrypted = await dependencies.encryptFactValue(identity, {
+          fieldKey,
+          plaintext,
+        });
+      } finally {
+        plaintext.fill(0);
+      }
+      const candidate = {
+        id: encrypted.id,
+        fieldKey,
+        ciphertext: encrypted.ciphertext,
+        keyVersion: encrypted.keyVersion,
+        sourceType,
+        sourceId: requiredUuid(body, "sourceId"),
+        evidenceIds: (body.evidenceIds ?? []) as string[],
+        ...(typeof body.confidence === "number"
+          ? { confidence: body.confidence }
+          : {}),
+        sensitivity,
+      };
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        body,
+      );
+      if (reservation.replay) {
+        if (reservation.statusCode === undefined)
+          throw new ApiProblem(
+            409,
+            "Request in progress",
+            "the idempotent request is still processing",
+          );
+        return reply
+          .code(reservation.statusCode)
+          .send(reservation.responseBody);
+      }
+      const created = await dependencies.repository.createCandidateFact(
+        identity,
+        candidate,
+      );
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        201,
+        created,
+      );
+      return reply.code(201).send(created);
+    },
+  );
 
   server.get(
     "/v1/documents",
@@ -522,94 +675,160 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/documents", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    const key = idempotencyKey(request);
-    const originalSha256 = requiredString(body, "originalSha256");
-    if (!/^[0-9a-f]{64}$/u.test(originalSha256))
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "originalSha256 must be a lowercase SHA-256 digest",
-      );
-    const mediaType = requiredString(body, "mediaType");
-    if (
-      !["application/pdf", "image/jpeg", "image/png", "image/tiff"].includes(
-        mediaType,
-      )
-    )
-      throw new ApiProblem(400, "Invalid request", "mediaType is invalid");
-    const maximumBytes = requiredPositiveInteger(body, "maximumBytes");
-    const documentConsentPolicyVersion = requiredString(
-      body,
-      "documentConsentPolicyVersion",
-    );
-    if (documentConsentPolicyVersion.length > 120)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "documentConsentPolicyVersion is too large",
-      );
-    if (typeof body.deleteOriginalAfterProcessing !== "boolean")
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "deleteOriginalAfterProcessing must be boolean",
-      );
-    if (maximumBytes > 100 * 1024 * 1024)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "maximumBytes exceeds the service limit",
-      );
-    const expiresAtValue = body.expiresAt;
-    let expiresAt: string | undefined;
-    if (expiresAtValue !== undefined) {
-      if (typeof expiresAtValue !== "string")
+  server.post(
+    "/v1/documents",
+    {
+      schema: {
+        tags: ["documents"],
+        summary: "Start a consent-bound encrypted document upload",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "originalSha256",
+            "mediaType",
+            "maximumBytes",
+            "documentConsentPolicyVersion",
+            "deleteOriginalAfterProcessing",
+          ],
+          properties: {
+            originalSha256: {
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+            },
+            mediaType: {
+              type: "string",
+              enum: [
+                "application/pdf",
+                "image/jpeg",
+                "image/png",
+                "image/tiff",
+              ],
+            },
+            maximumBytes: { type: "integer", minimum: 1 },
+            expiresAt: { type: "string", format: "date-time" },
+            documentConsentPolicyVersion: {
+              type: "string",
+              minLength: 1,
+              maxLength: 120,
+            },
+            deleteOriginalAfterProcessing: { type: "boolean" },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      const key = idempotencyKey(request);
+      creationVersion(request);
+      const originalSha256 = requiredString(body, "originalSha256");
+      if (!/^[0-9a-f]{64}$/u.test(originalSha256))
         throw new ApiProblem(
           400,
           "Invalid request",
-          "expiresAt must be an ISO 8601 timestamp",
+          "originalSha256 must be a lowercase SHA-256 digest",
         );
-      const parsedExpiresAt = new Date(expiresAtValue);
+      const mediaType = requiredString(body, "mediaType");
       if (
-        Number.isNaN(parsedExpiresAt.valueOf()) ||
-        !/[zZ]|[+-]\d{2}:\d{2}$/u.test(expiresAtValue)
+        !["application/pdf", "image/jpeg", "image/png", "image/tiff"].includes(
+          mediaType,
+        )
       )
+        throw new ApiProblem(400, "Invalid request", "mediaType is invalid");
+      const maximumBytes = requiredPositiveInteger(body, "maximumBytes");
+      const documentConsentPolicyVersion = requiredString(
+        body,
+        "documentConsentPolicyVersion",
+      );
+      if (documentConsentPolicyVersion.length > 120)
         throw new ApiProblem(
           400,
           "Invalid request",
-          "expiresAt must be an ISO 8601 timestamp with a timezone",
+          "documentConsentPolicyVersion is too large",
         );
-      expiresAt = parsedExpiresAt.toISOString();
-    }
-    for (const category of allRecordCategories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "create",
-        purpose: "vault.document.create",
+      if (typeof body.deleteOriginalAfterProcessing !== "boolean")
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "deleteOriginalAfterProcessing must be boolean",
+        );
+      if (maximumBytes > 100 * 1024 * 1024)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "maximumBytes exceeds the service limit",
+        );
+      const expiresAtValue = body.expiresAt;
+      let expiresAt: string | undefined;
+      if (expiresAtValue !== undefined) {
+        if (typeof expiresAtValue !== "string")
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            "expiresAt must be an ISO 8601 timestamp",
+          );
+        const parsedExpiresAt = new Date(expiresAtValue);
+        if (
+          Number.isNaN(parsedExpiresAt.valueOf()) ||
+          !/[zZ]|[+-]\d{2}:\d{2}$/u.test(expiresAtValue)
+        )
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            "expiresAt must be an ISO 8601 timestamp with a timezone",
+          );
+        expiresAt = parsedExpiresAt.toISOString();
+      }
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "create",
+          purpose: "vault.document.create",
+        });
+      if (!dependencies.startDocumentUpload)
+        throw new ApiProblem(
+          503,
+          "Document upload unavailable",
+          "Document uploads are not configured.",
+        );
+      const started = await dependencies.startDocumentUpload(identity, {
+        idempotencyKey: key,
+        originalSha256,
+        mediaType,
+        maximumBytes,
+        documentConsentPolicyVersion,
+        deleteOriginalAfterProcessing: body.deleteOriginalAfterProcessing,
+        ...(expiresAt ? { expiresAt } : {}),
       });
-    if (!dependencies.startDocumentUpload)
-      throw new ApiProblem(
-        503,
-        "Document upload unavailable",
-        "Document uploads are not configured.",
-      );
-    const started = await dependencies.startDocumentUpload(identity, {
-      idempotencyKey: key,
-      originalSha256,
-      mediaType,
-      maximumBytes,
-      documentConsentPolicyVersion,
-      deleteOriginalAfterProcessing: body.deleteOriginalAfterProcessing,
-      ...(expiresAt ? { expiresAt } : {}),
-    });
-    return reply.header("cache-control", "no-store").code(201).send(started);
-  });
+      return reply.header("cache-control", "no-store").code(201).send(started);
+    },
+  );
 
   server.post<{ Params: { id: string } }>(
     "/v1/documents/:id/upload-url",
+    {
+      schema: {
+        tags: ["documents"],
+        summary: "Create a bounded presigned encrypted upload URL",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["ciphertextSha256"],
+          properties: {
+            ciphertextSha256: {
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       idempotencyKey(request);
@@ -651,206 +870,293 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/extractions/manual", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    const key = idempotencyKey(request);
-    const documentId = requiredUuid(body, "documentId");
-    const workflowId = requiredUuid(body, "workflowId");
-    const expectedWorkflowVersion = Number(request.headers["if-match"]);
-    if (
-      !Number.isSafeInteger(expectedWorkflowVersion) ||
-      expectedWorkflowVersion < 1
-    )
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "a valid if-match workflow version is required",
+  server.post(
+    "/v1/extractions/manual",
+    {
+      schema: {
+        tags: ["extractions"],
+        summary: "Persist evidence-linked manual extraction candidates",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["documentId", "workflowId", "candidates"],
+          properties: {
+            documentId: { type: "string", format: "uuid" },
+            workflowId: { type: "string", format: "uuid" },
+            candidates: {
+              type: "array",
+              minItems: 1,
+              maxItems: 50,
+              items: {
+                type: "object",
+                additionalProperties: false,
+                required: ["fieldKey", "value", "locator", "sensitivity"],
+                properties: {
+                  fieldKey: { type: "string", minLength: 3, maxLength: 200 },
+                  value: {},
+                  locator: { type: "string", minLength: 1, maxLength: 256 },
+                  sensitivity: {
+                    type: "string",
+                    enum: ["standard", "sensitive", "highly-sensitive"],
+                  },
+                  confidence: { type: "number", minimum: 0, maximum: 1 },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      const key = idempotencyKey(request);
+      const documentId = requiredUuid(body, "documentId");
+      const workflowId = requiredUuid(body, "workflowId");
+      const expectedWorkflowVersion = Number(request.headers["if-match"]);
+      if (
+        !Number.isSafeInteger(expectedWorkflowVersion) ||
+        expectedWorkflowVersion < 1
+      )
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match workflow version is required",
+        );
+      if (
+        !Array.isArray(body.candidates) ||
+        body.candidates.length < 1 ||
+        body.candidates.length > 50
+      )
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "candidates must contain between 1 and 50 items",
+        );
+      const candidates = body.candidates.map((candidate, index) => {
+        const item = objectBody(candidate);
+        const fieldKey = requiredString(item, "fieldKey");
+        const category = factCategory(fieldKey);
+        const locator = requiredString(item, "locator");
+        if (locator.length > 256)
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            `candidates[${index}].locator is too long`,
+          );
+        const sensitivity = requiredString(item, "sensitivity");
+        if (
+          !["standard", "sensitive", "highly-sensitive"].includes(sensitivity)
+        )
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            `candidates[${index}].sensitivity is invalid`,
+          );
+        if (!Object.hasOwn(item, "value"))
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            `candidates[${index}].value is required`,
+          );
+        const serialized = JSON.stringify(item.value);
+        if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            `candidates[${index}].value is invalid`,
+          );
+        const prohibited = scanDlp(serialized).filter(
+          (finding) => finding !== "prompt-injection",
+        );
+        if (prohibited.length)
+          throw new ApiProblem(
+            400,
+            "Prohibited content",
+            `candidates[${index}].value contains prohibited ${prohibited.join(", ")}`,
+          );
+        if (
+          item.confidence !== undefined &&
+          (typeof item.confidence !== "number" ||
+            item.confidence < 0 ||
+            item.confidence > 1)
+        )
+          throw new ApiProblem(
+            400,
+            "Invalid request",
+            `candidates[${index}].confidence is invalid`,
+          );
+        return {
+          fieldKey,
+          category,
+          value: item.value,
+          locator,
+          sensitivity,
+          ...(typeof item.confidence === "number"
+            ? { confidence: item.confidence }
+            : {}),
+        };
+      });
+      for (const candidate of candidates)
+        await dependencies.authorizeIdentity?.(identity, {
+          category: candidate.category,
+          action: "create",
+          purpose: "vault.extraction.manual",
+        });
+      if (!dependencies.completeManualDocumentExtraction)
+        throw new ApiProblem(
+          503,
+          "Manual extraction unavailable",
+          "Manual extraction is not configured.",
+        );
+      const completed = await dependencies.completeManualDocumentExtraction(
+        identity,
+        {
+          documentId,
+          workflowId,
+          expectedWorkflowVersion,
+          idempotencyKey: key,
+          candidates: candidates.map(
+            ({ category: _category, ...candidate }) => candidate,
+          ),
+        },
       );
-    if (
-      !Array.isArray(body.candidates) ||
-      body.candidates.length < 1 ||
-      body.candidates.length > 50
-    )
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "candidates must contain between 1 and 50 items",
-      );
-    const candidates = body.candidates.map((candidate, index) => {
-      const item = objectBody(candidate);
-      const fieldKey = requiredString(item, "fieldKey");
-      const category = factCategory(fieldKey);
-      const locator = requiredString(item, "locator");
-      if (locator.length > 256)
-        throw new ApiProblem(
-          400,
-          "Invalid request",
-          `candidates[${index}].locator is too long`,
-        );
-      const sensitivity = requiredString(item, "sensitivity");
-      if (!["standard", "sensitive", "highly-sensitive"].includes(sensitivity))
-        throw new ApiProblem(
-          400,
-          "Invalid request",
-          `candidates[${index}].sensitivity is invalid`,
-        );
-      if (!Object.hasOwn(item, "value"))
-        throw new ApiProblem(
-          400,
-          "Invalid request",
-          `candidates[${index}].value is required`,
-        );
-      const serialized = JSON.stringify(item.value);
-      if (serialized === undefined || Buffer.byteLength(serialized) > 65_536)
-        throw new ApiProblem(
-          400,
-          "Invalid request",
-          `candidates[${index}].value is invalid`,
-        );
-      const prohibited = scanDlp(serialized).filter(
-        (finding) => finding !== "prompt-injection",
-      );
-      if (prohibited.length)
+      return reply.code(201).send(completed);
+    },
+  );
+
+  server.post(
+    "/v1/ai-settings/interview",
+    {
+      schema: {
+        tags: ["ai-settings"],
+        summary: "Run a consent-bound non-authoritative AI interview turn",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["message", "categories"],
+          properties: {
+            message: { type: "string", minLength: 1, maxLength: 20_000 },
+            categories: {
+              type: "array",
+              minItems: 1,
+              uniqueItems: true,
+              items: { type: "string", enum: [...allRecordCategories] },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      const key = idempotencyKey(request);
+      const message = requiredString(body, "message");
+      if (Buffer.byteLength(message) > 20_000)
+        throw new ApiProblem(400, "Invalid request", "message is too large");
+      const findings = scanDlp(message);
+      if (findings.length)
         throw new ApiProblem(
           400,
           "Prohibited content",
-          `candidates[${index}].value contains prohibited ${prohibited.join(", ")}`,
+          `message contains prohibited ${findings.join(", ")}`,
         );
       if (
-        item.confidence !== undefined &&
-        (typeof item.confidence !== "number" ||
-          item.confidence < 0 ||
-          item.confidence > 1)
+        !Array.isArray(body.categories) ||
+        body.categories.length === 0 ||
+        !body.categories.every(
+          (category) =>
+            typeof category === "string" &&
+            allRecordCategories.includes(category as RecordCategory),
+        )
+      )
+        throw new ApiProblem(400, "Invalid request", "categories are invalid");
+      const categories = [...new Set(body.categories)] as RecordCategory[];
+      const expectedConsentVersion = Number(request.headers["if-match"]);
+      if (
+        !Number.isSafeInteger(expectedConsentVersion) ||
+        expectedConsentVersion < 1
       )
         throw new ApiProblem(
           400,
           "Invalid request",
-          `candidates[${index}].confidence is invalid`,
+          "a valid if-match consent version is required",
         );
-      return {
-        fieldKey,
-        category,
-        value: item.value,
-        locator,
-        sensitivity,
-        ...(typeof item.confidence === "number"
-          ? { confidence: item.confidence }
-          : {}),
-      };
-    });
-    for (const candidate of candidates)
-      await dependencies.authorizeIdentity?.(identity, {
-        category: candidate.category,
-        action: "create",
-        purpose: "vault.extraction.manual",
-      });
-    if (!dependencies.completeManualDocumentExtraction)
-      throw new ApiProblem(
-        503,
-        "Manual extraction unavailable",
-        "Manual extraction is not configured.",
-      );
-    const completed = await dependencies.completeManualDocumentExtraction(
-      identity,
-      {
-        documentId,
-        workflowId,
-        expectedWorkflowVersion,
-        idempotencyKey: key,
-        candidates: candidates.map(
-          ({ category: _category, ...candidate }) => candidate,
-        ),
-      },
-    );
-    return reply.code(201).send(completed);
-  });
-
-  server.post("/v1/ai-settings/interview", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    const key = idempotencyKey(request);
-    const message = requiredString(body, "message");
-    if (Buffer.byteLength(message) > 20_000)
-      throw new ApiProblem(400, "Invalid request", "message is too large");
-    const findings = scanDlp(message);
-    if (findings.length)
-      throw new ApiProblem(
-        400,
-        "Prohibited content",
-        `message contains prohibited ${findings.join(", ")}`,
-      );
-    if (
-      !Array.isArray(body.categories) ||
-      body.categories.length === 0 ||
-      !body.categories.every(
-        (category) =>
-          typeof category === "string" &&
-          allRecordCategories.includes(category as RecordCategory),
-      )
-    )
-      throw new ApiProblem(400, "Invalid request", "categories are invalid");
-    const categories = [...new Set(body.categories)] as RecordCategory[];
-    const expectedConsentVersion = Number(request.headers["if-match"]);
-    if (
-      !Number.isSafeInteger(expectedConsentVersion) ||
-      expectedConsentVersion < 1
-    )
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "a valid if-match consent version is required",
-      );
-    for (const category of categories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "read",
-        purpose: "vault.ai.interview",
-      });
-    if (!dependencies.runAiInterview)
-      throw new ApiProblem(
-        503,
-        "AI unavailable",
-        "External AI is not configured.",
-      );
-    try {
-      const response = await dependencies.runAiInterview(identity, {
-        message,
-        categories,
-        expectedConsentVersion,
-        idempotencyKey: key,
-      });
-      return reply.header("cache-control", "no-store").send(response);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "";
-      if (message.includes("consent"))
-        throw new ApiProblem(
-          403,
-          "AI consent required",
-          "Affirmative external AI consent is required.",
-        );
-      if (message.includes("idempotency"))
-        throw new ApiProblem(
-          409,
-          "Idempotency conflict",
-          "The idempotency key was reused with different input.",
-        );
-      if (message.includes("unavailable"))
+      for (const category of categories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "read",
+          purpose: "vault.ai.interview",
+        });
+      if (!dependencies.runAiInterview)
         throw new ApiProblem(
           503,
           "AI unavailable",
-          "External AI is temporarily unavailable.",
+          "External AI is not configured.",
         );
-      throw new ApiProblem(
-        502,
-        "AI response rejected",
-        "The external AI response did not pass policy validation.",
-      );
-    }
-  });
+      try {
+        const response = await dependencies.runAiInterview(identity, {
+          message,
+          categories,
+          expectedConsentVersion,
+          idempotencyKey: key,
+        });
+        return reply.header("cache-control", "no-store").send(response);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        if (message.includes("consent"))
+          throw new ApiProblem(
+            403,
+            "AI consent required",
+            "Affirmative external AI consent is required.",
+          );
+        if (message.includes("idempotency"))
+          throw new ApiProblem(
+            409,
+            "Idempotency conflict",
+            "The idempotency key was reused with different input.",
+          );
+        if (message.includes("unavailable"))
+          throw new ApiProblem(
+            503,
+            "AI unavailable",
+            "External AI is temporarily unavailable.",
+          );
+        throw new ApiProblem(
+          502,
+          "AI response rejected",
+          "The external AI response did not pass policy validation.",
+        );
+      }
+    },
+  );
 
   server.post<{ Params: { id: string } }>(
     "/v1/documents/:id/complete",
+    {
+      schema: {
+        tags: ["documents"],
+        summary: "Complete encrypted upload and queue processing",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["ciphertextSha256"],
+          properties: {
+            ciphertextSha256: {
+              type: "string",
+              pattern: "^[0-9a-f]{64}$",
+            },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       const key = idempotencyKey(request);
@@ -895,6 +1201,15 @@ export async function registerVaultRoutes(
 
   server.post<{ Params: { id: string } }>(
     "/v1/facts/:id/confirm",
+    {
+      schema: {
+        tags: ["facts"],
+        summary: "Confirm a candidate or disputed fact",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -950,6 +1265,15 @@ export async function registerVaultRoutes(
 
   server.post<{ Params: { id: string } }>(
     "/v1/facts/:id/reject",
+    {
+      schema: {
+        tags: ["facts"],
+        summary: "Reject a candidate fact",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1004,6 +1328,15 @@ export async function registerVaultRoutes(
 
   server.post<{ Params: { id: string } }>(
     "/v1/facts/:id/dispute",
+    {
+      schema: {
+        tags: ["facts"],
+        summary: "Dispute a confirmed fact",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1056,89 +1389,146 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/emergency-access", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    const recipientMembershipId = requiredUuid(body, "recipientMembershipId");
-    if (recipientMembershipId !== identity.membershipId)
-      throw new ApiProblem(
-        403,
-        "Access denied",
-        "Emergency access may be requested only for the active membership.",
-      );
-    if (
-      !Array.isArray(body.categories) ||
-      body.categories.length === 0 ||
-      !body.categories.every(
-        (category) =>
-          typeof category === "string" &&
-          allRecordCategories.includes(category as RecordCategory),
+  server.post(
+    "/v1/emergency-access",
+    {
+      schema: {
+        tags: ["emergency-access"],
+        summary: "Request compartmentalized emergency access",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["recipientMembershipId", "categories", "reason"],
+          properties: {
+            recipientMembershipId: { type: "string", format: "uuid" },
+            categories: {
+              type: "array",
+              minItems: 1,
+              uniqueItems: true,
+              items: { type: "string", enum: allRecordCategories },
+            },
+            reason: { type: "string", minLength: 1, maxLength: 2000 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      creationVersion(request);
+      const recipientMembershipId = requiredUuid(body, "recipientMembershipId");
+      if (recipientMembershipId !== identity.membershipId)
+        throw new ApiProblem(
+          403,
+          "Access denied",
+          "Emergency access may be requested only for the active membership.",
+        );
+      if (
+        !Array.isArray(body.categories) ||
+        body.categories.length === 0 ||
+        !body.categories.every(
+          (category) =>
+            typeof category === "string" &&
+            allRecordCategories.includes(category as RecordCategory),
+        )
       )
-    )
-      throw new ApiProblem(400, "Invalid request", "categories are invalid");
-    const categories = [...new Set(body.categories as RecordCategory[])].sort();
-    const reason = requiredString(body, "reason");
-    if (Buffer.byteLength(reason) > 2_000)
-      throw new ApiProblem(400, "Invalid request", "reason is too large");
-    const findings = scanDlp(reason);
-    if (findings.length)
-      throw new ApiProblem(
-        400,
-        "Prohibited content",
-        `reason contains prohibited ${findings.join(", ")}`,
-      );
-    for (const category of categories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "create",
-        purpose: "vault.emergency-access.request",
-      });
-    if (!dependencies.encryptEmergencyReason)
-      throw new ApiProblem(
-        503,
-        "Emergency access unavailable",
-        "Emergency access encryption is not configured.",
-      );
-    const key = idempotencyKey(request);
-    const requestShape = { recipientMembershipId, categories, reason };
-    const reservation = await dependencies.repository.reserveIdempotency(
-      identity,
-      key,
-      requestShape,
-    );
-    if (reservation.replay)
-      return reply
-        .code(reservation.statusCode ?? 409)
-        .send(reservation.responseBody ?? { status: "processing" });
-    const plaintext = Buffer.from(reason, "utf8");
-    try {
-      const encrypted = await dependencies.encryptEmergencyReason(
-        identity,
-        plaintext,
-      );
-      const created =
-        await dependencies.repository.createEmergencyAccessRequest(identity, {
-          id: encrypted.id,
-          recipientMembershipId,
-          categories,
-          reasonEncrypted: encrypted.ciphertext,
-          keyVersion: encrypted.keyVersion,
-          requestedAt: new Date().toISOString(),
+        throw new ApiProblem(400, "Invalid request", "categories are invalid");
+      const categories = [
+        ...new Set(body.categories as RecordCategory[]),
+      ].sort();
+      const reason = requiredString(body, "reason");
+      if (Buffer.byteLength(reason) > 2_000)
+        throw new ApiProblem(400, "Invalid request", "reason is too large");
+      const findings = scanDlp(reason);
+      if (findings.length)
+        throw new ApiProblem(
+          400,
+          "Prohibited content",
+          `reason contains prohibited ${findings.join(", ")}`,
+        );
+      for (const category of categories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "create",
+          purpose: "vault.emergency-access.request",
         });
-      await dependencies.repository.completeIdempotency(
+      if (!dependencies.encryptEmergencyReason)
+        throw new ApiProblem(
+          503,
+          "Emergency access unavailable",
+          "Emergency access encryption is not configured.",
+        );
+      const key = idempotencyKey(request);
+      const requestShape = { recipientMembershipId, categories, reason };
+      const reservation = await dependencies.repository.reserveIdempotency(
         identity,
         key,
-        201,
-        created,
+        requestShape,
       );
-      return reply.header("cache-control", "no-store").code(201).send(created);
-    } finally {
-      plaintext.fill(0);
-    }
-  });
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      const plaintext = Buffer.from(reason, "utf8");
+      try {
+        const encrypted = await dependencies.encryptEmergencyReason(
+          identity,
+          plaintext,
+        );
+        const created =
+          await dependencies.repository.createEmergencyAccessRequest(identity, {
+            id: encrypted.id,
+            recipientMembershipId,
+            categories,
+            reasonEncrypted: encrypted.ciphertext,
+            keyVersion: encrypted.keyVersion,
+            requestedAt: new Date().toISOString(),
+          });
+        await dependencies.repository.completeIdempotency(
+          identity,
+          key,
+          201,
+          created,
+        );
+        return reply
+          .header("cache-control", "no-store")
+          .code(201)
+          .send(created);
+      } finally {
+        plaintext.fill(0);
+      }
+    },
+  );
 
   server.post<{ Params: { id: string } }>(
     "/v1/emergency-access/:id/decide",
+    {
+      schema: {
+        tags: ["emergency-access"],
+        summary: "Deny or delay an emergency-access request",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["decision"],
+          properties: {
+            decision: { type: "string", enum: ["deny", "delay"] },
+            delayHours: { type: "integer", minimum: 1, maximum: 168 },
+          },
+          allOf: [
+            {
+              if: { properties: { decision: { const: "delay" } } },
+              then: { required: ["delayHours"] },
+              else: { not: { required: ["delayHours"] } },
+            },
+          ],
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1236,6 +1626,15 @@ export async function registerVaultRoutes(
 
   server.post<{ Params: { id: string } }>(
     "/v1/emergency-access/:id/release",
+    {
+      schema: {
+        tags: ["emergency-access"],
+        summary: "Release an approved emergency-access request",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1301,53 +1700,94 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/consents", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    await dependencies.authorizeIdentity?.(identity, {
-      category: "household-instructions",
-      action: "approve",
-      purpose: "vault.consent.record",
-    });
-    const purpose = requiredString(body, "purpose");
-    if (
-      ![
-        "external-ai",
-        "sensitive-data",
-        "document-processing",
-        "transactional-email",
-        "terms",
-        "privacy-policy",
-      ].includes(purpose)
-    )
-      throw new ApiProblem(400, "Invalid request", "purpose is invalid");
-    const key = idempotencyKey(request);
-    const reservation = await dependencies.repository.reserveIdempotency(
-      identity,
-      key,
-      body,
-    );
-    if (reservation.replay)
-      return reply
-        .code(reservation.statusCode ?? 409)
-        .send(reservation.responseBody ?? { status: "processing" });
-    const consent = await dependencies.repository.recordConsent(identity, {
-      personId: requiredUuid(body, "personId"),
-      purpose,
-      policyVersion: requiredString(body, "policyVersion"),
-      grantedAt: new Date().toISOString(),
-    });
-    await dependencies.repository.completeIdempotency(
-      identity,
-      key,
-      201,
-      consent,
-    );
-    return reply.code(201).send(consent);
-  });
+  server.post(
+    "/v1/consents",
+    {
+      schema: {
+        tags: ["consents"],
+        summary: "Record a versioned purpose-specific consent",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personId", "purpose", "policyVersion"],
+          properties: {
+            personId: { type: "string", format: "uuid" },
+            purpose: {
+              type: "string",
+              enum: [
+                "external-ai",
+                "sensitive-data",
+                "document-processing",
+                "transactional-email",
+                "terms",
+                "privacy-policy",
+              ],
+            },
+            policyVersion: { type: "string", minLength: 1, maxLength: 120 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      creationVersion(request);
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.consent.record",
+      });
+      const purpose = requiredString(body, "purpose");
+      if (
+        ![
+          "external-ai",
+          "sensitive-data",
+          "document-processing",
+          "transactional-email",
+          "terms",
+          "privacy-policy",
+        ].includes(purpose)
+      )
+        throw new ApiProblem(400, "Invalid request", "purpose is invalid");
+      const key = idempotencyKey(request);
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        body,
+      );
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      const consent = await dependencies.repository.recordConsent(identity, {
+        personId: requiredUuid(body, "personId"),
+        purpose,
+        policyVersion: requiredString(body, "policyVersion"),
+        grantedAt: new Date().toISOString(),
+      });
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        201,
+        consent,
+      );
+      return reply.code(201).send(consent);
+    },
+  );
 
   server.post<{ Params: { id: string } }>(
     "/v1/consents/:id/withdraw",
+    {
+      schema: {
+        tags: ["consents"],
+        summary: "Withdraw a versioned consent",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: uuidPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       await dependencies.authorizeIdentity?.(identity, {
@@ -1394,41 +1834,78 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/privacy-requests", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    const body = objectBody(request.body);
-    await dependencies.authorizeIdentity?.(identity, {
-      category: "household-instructions",
-      action: "create",
-      purpose: "vault.privacy-request.create",
-    });
-    const kind = requiredString(body, "kind");
-    if (
-      !["access", "correction", "export", "deletion", "appeal"].includes(kind)
-    )
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "privacy request kind is invalid",
+  server.post(
+    "/v1/privacy-requests",
+    {
+      schema: {
+        tags: ["privacy"],
+        summary: "Create a data-subject privacy request",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["personId", "kind"],
+          properties: {
+            personId: { type: "string", format: "uuid" },
+            kind: {
+              type: "string",
+              enum: ["access", "correction", "export", "deletion", "appeal"],
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      const body = objectBody(request.body);
+      creationVersion(request);
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "create",
+        purpose: "vault.privacy-request.create",
+      });
+      const kind = requiredString(body, "kind");
+      if (
+        !["access", "correction", "export", "deletion", "appeal"].includes(kind)
+      )
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "privacy request kind is invalid",
+        );
+      const personId = requiredUuid(body, "personId");
+      if (personId !== identity.actorId)
+        throw new ApiProblem(
+          403,
+          "Forbidden",
+          "privacy requests must be submitted by the data subject",
+        );
+      const result = await dependencies.repository.startPrivacyRequest(
+        identity,
+        {
+          personId,
+          kind: kind as
+            "access" | "correction" | "export" | "deletion" | "appeal",
+          idempotencyKey: idempotencyKey(request),
+          requestedAt: new Date().toISOString(),
+        },
       );
-    const personId = requiredUuid(body, "personId");
-    if (personId !== identity.actorId)
-      throw new ApiProblem(
-        403,
-        "Forbidden",
-        "privacy requests must be submitted by the data subject",
-      );
-    const result = await dependencies.repository.startPrivacyRequest(identity, {
-      personId,
-      kind: kind as "access" | "correction" | "export" | "deletion" | "appeal",
-      idempotencyKey: idempotencyKey(request),
-      requestedAt: new Date().toISOString(),
-    });
-    return reply.code(202).send(result);
-  });
+      return reply.code(202).send(result);
+    },
+  );
 
   server.post(
     "/v1/privacy-requests/:requestId/confirm-deletion",
+    {
+      schema: {
+        tags: ["privacy"],
+        summary: "Confirm a deletion request",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: privacyRequestPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!dependencies.confirmPrivacyDeletion)
@@ -1468,6 +1945,15 @@ export async function registerVaultRoutes(
 
   server.post(
     "/v1/privacy-requests/:requestId/cancel-deletion",
+    {
+      schema: {
+        tags: ["privacy"],
+        summary: "Cancel a pending deletion request",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: privacyRequestPathSchema,
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!dependencies.cancelPrivacyDeletion)
@@ -1505,45 +1991,68 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/exports", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.startPortableExport)
-      throw new ApiProblem(
-        503,
-        "Export unavailable",
-        "The export workflow is not configured.",
-      );
-    for (const category of allRecordCategories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "export",
-        purpose: "vault.export.create",
-      });
-    const body = objectBody(request.body);
-    const encodedKey = requiredString(body, "exportKeyBase64");
-    if (!/^[A-Za-z0-9+/]{43}=$/u.test(encodedKey))
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "exportKeyBase64 must encode exactly 32 bytes",
-      );
-    const exportKey = Buffer.from(encodedKey, "base64");
-    if (exportKey.byteLength !== 32)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "exportKeyBase64 must encode exactly 32 bytes",
-      );
-    try {
-      const started = await dependencies.startPortableExport(identity, {
-        idempotencyKey: idempotencyKey(request),
-        exportKey,
-      });
-      return reply.code(202).send(started);
-    } finally {
-      exportKey.fill(0);
-    }
-  });
+  server.post(
+    "/v1/exports",
+    {
+      schema: {
+        tags: ["exports"],
+        summary: "Start an encrypted portable export",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["exportKeyBase64"],
+          properties: {
+            exportKeyBase64: {
+              type: "string",
+              pattern: "^[A-Za-z0-9+/]{43}=$",
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      creationVersion(request);
+      if (!dependencies.startPortableExport)
+        throw new ApiProblem(
+          503,
+          "Export unavailable",
+          "The export workflow is not configured.",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "export",
+          purpose: "vault.export.create",
+        });
+      const body = objectBody(request.body);
+      const encodedKey = requiredString(body, "exportKeyBase64");
+      if (!/^[A-Za-z0-9+/]{43}=$/u.test(encodedKey))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "exportKeyBase64 must encode exactly 32 bytes",
+        );
+      const exportKey = Buffer.from(encodedKey, "base64");
+      if (exportKey.byteLength !== 32)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "exportKeyBase64 must encode exactly 32 bytes",
+        );
+      try {
+        const started = await dependencies.startPortableExport(identity, {
+          idempotencyKey: idempotencyKey(request),
+          exportKey,
+        });
+        return reply.code(202).send(started);
+      } finally {
+        exportKey.fill(0);
+      }
+    },
+  );
 
   server.get<{ Params: { id: string } }>(
     "/v1/exports/:id",
@@ -1624,85 +2133,146 @@ export async function registerVaultRoutes(
     },
   );
 
-  server.post("/v1/reports", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.createReport)
-      throw new ApiProblem(
-        503,
-        "Report unavailable",
-        "Report generation is not configured.",
-      );
-    for (const category of allRecordCategories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "read",
-        purpose: "vault.report.create",
-      });
-    const body = objectBody(request.body);
-    const kind = requiredString(body, "kind");
-    if (
-      ![
-        "life-inventory",
-        "family-emergency-guide",
-        "executor-preparation-packet",
-        "beneficiary-review-checklist",
-        "document-gap-report",
-        "household-continuity-guide",
-        "annual-review",
-      ].includes(kind)
-    )
-      throw new ApiProblem(400, "Invalid request", "report kind is invalid");
-    const key = idempotencyKey(request);
-    const reservation = await dependencies.repository.reserveIdempotency(
-      identity,
-      key,
-      { kind },
-    );
-    if (reservation.replay)
-      return reply
-        .code(reservation.statusCode ?? 409)
-        .send(reservation.responseBody ?? { status: "processing" });
-    const report = await dependencies.createReport(
-      identity,
-      kind as ReportKind,
-      key,
-    );
-    await dependencies.repository.completeIdempotency(
-      identity,
-      key,
-      202,
-      report,
-    );
-    return reply.code(202).send(report);
-  });
-
-  server.post("/v1/billing/checkout", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.createCheckout)
-      throw new ApiProblem(
-        503,
-        "Billing unavailable",
-        "Billing checkout is not configured.",
-      );
-    await dependencies.authorizeIdentity?.(identity, {
-      category: "household-instructions",
-      action: "approve",
-      purpose: "vault.billing.checkout",
-    });
-    try {
-      return reply
-        .code(201)
-        .send(
-          await dependencies.createCheckout(identity, idempotencyKey(request)),
+  server.post(
+    "/v1/reports",
+    {
+      schema: {
+        tags: ["reports"],
+        summary: "Queue an evidence-linked report",
+        security: [{ sessionCookie: [] }],
+        headers: creationWriteHeaderSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: {
+            kind: {
+              type: "string",
+              enum: [
+                "life-inventory",
+                "family-emergency-guide",
+                "executor-preparation-packet",
+                "beneficiary-review-checklist",
+                "document-gap-report",
+                "household-continuity-guide",
+                "annual-review",
+              ],
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      creationVersion(request);
+      if (!dependencies.createReport)
+        throw new ApiProblem(
+          503,
+          "Report unavailable",
+          "Report generation is not configured.",
         );
-    } catch {
-      throw new ApiProblem(
-        503,
-        "Billing unavailable",
-        "Billing checkout could not be created.",
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "read",
+          purpose: "vault.report.create",
+        });
+      const body = objectBody(request.body);
+      const kind = requiredString(body, "kind");
+      if (
+        ![
+          "life-inventory",
+          "family-emergency-guide",
+          "executor-preparation-packet",
+          "beneficiary-review-checklist",
+          "document-gap-report",
+          "household-continuity-guide",
+          "annual-review",
+        ].includes(kind)
+      )
+        throw new ApiProblem(400, "Invalid request", "report kind is invalid");
+      const key = idempotencyKey(request);
+      const reservation = await dependencies.repository.reserveIdempotency(
+        identity,
+        key,
+        { kind },
       );
-    }
-  });
+      if (reservation.replay)
+        return reply
+          .code(reservation.statusCode ?? 409)
+          .send(reservation.responseBody ?? { status: "processing" });
+      const report = await dependencies.createReport(
+        identity,
+        kind as ReportKind,
+        key,
+      );
+      await dependencies.repository.completeIdempotency(
+        identity,
+        key,
+        202,
+        report,
+      );
+      return reply.code(202).send(report);
+    },
+  );
+
+  server.post(
+    "/v1/billing/checkout",
+    {
+      schema: {
+        tags: ["billing"],
+        summary: "Create a hosted billing checkout",
+        security: [{ sessionCookie: [] }],
+        headers: mutationWriteHeaderSchema,
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.createCheckout)
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Billing checkout is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.billing.checkout",
+      });
+      const expectedVersion = mutationVersion(request);
+      if (!dependencies.getSubscription)
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Subscription retrieval is not configured.",
+        );
+      const subscription = (await dependencies.getSubscription(identity)) as {
+        version?: unknown;
+      };
+      if (subscription.version !== expectedVersion)
+        throw new ApiProblem(
+          409,
+          "Version conflict",
+          "The subscription changed before checkout was created.",
+        );
+      try {
+        return reply
+          .code(201)
+          .send(
+            await dependencies.createCheckout(
+              identity,
+              idempotencyKey(request),
+            ),
+          );
+      } catch {
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Billing checkout could not be created.",
+        );
+      }
+    },
+  );
 
   server.get(
     "/v1/billing/subscription",

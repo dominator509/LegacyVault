@@ -9,6 +9,7 @@ import {
   type IdentityResolver,
 } from "./routes/vault.js";
 import { registerBillingRoutes } from "./routes/billing.js";
+import { problemDetailsSchema } from "./openapi.js";
 import type { StripeAdapter } from "./adapters/stripe.js";
 import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
 import { createApplicationRuntime } from "./runtime.js";
@@ -189,6 +190,11 @@ export function buildServer(dependencies?: ServerDependencies) {
   });
 
   server.register(swagger, {
+    refResolver: {
+      buildLocalReference(json, _baseUri, _fragment, index) {
+        return typeof json.$id === "string" ? json.$id : `schema-${index}`;
+      },
+    },
     openapi: {
       openapi: "3.1.0",
       info: {
@@ -204,6 +210,7 @@ export function buildServer(dependencies?: ServerDependencies) {
       },
     },
   });
+  server.addSchema(problemDetailsSchema);
 
   server.get("/health/live", async () => ({ status: "live" as const }));
   server.get("/health/ready", async (_request, reply) => {
