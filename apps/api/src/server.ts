@@ -64,6 +64,10 @@ export interface ServerDependencies {
   listVaultDocuments?: (
     identity: AuthenticatedTenantIdentity,
   ) => Promise<readonly unknown[]>;
+  listAuditEvents?: (
+    identity: AuthenticatedTenantIdentity,
+    input: { afterSequence: number; limit: number },
+  ) => Promise<unknown>;
   createReport?: (
     identity: AuthenticatedTenantIdentity,
     kind: ReportKind,
@@ -155,6 +159,7 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.encryptEmergencyReason ||
       !dependencies.listVaultFacts ||
       !dependencies.listVaultDocuments ||
+      !dependencies.listAuditEvents ||
       !dependencies.createReport ||
       !dependencies.getReport ||
       !dependencies.createCheckout ||

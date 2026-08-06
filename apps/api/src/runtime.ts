@@ -419,6 +419,19 @@ export function createApplicationRuntime(environment: Environment): {
         }
       },
       listVaultDocuments: (identity) => repository.listVaultDocuments(identity),
+      listAuditEvents: async (identity, input) => {
+        const page = await auditStore.readVerified(identity, input);
+        return {
+          ...page,
+          events: page.events.map(
+            ({
+              organizationId: _organizationId,
+              householdId: _householdId,
+              ...event
+            }) => event,
+          ),
+        };
+      },
       createReport: async (identity, kind, idempotencyKey) => {
         const started = await repository.startReport(identity, {
           idempotencyKey,

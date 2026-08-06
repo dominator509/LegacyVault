@@ -113,6 +113,21 @@ const server = buildServer({
       version: 2,
     },
   ],
+  listAuditEvents: async (_resolved, input) => ({
+    events: [
+      {
+        sequence: input.afterSequence + 1,
+        occurredAt: "2026-08-06T00:00:00.000Z",
+        actorPseudonym: "pseudonym",
+        action: "vault.fact.confirm",
+        outcome: "allowed",
+        metadata: { category: "insurance" },
+        previousHash: "GENESIS",
+        eventHash: "hash",
+      },
+    ],
+    nextSequence: null,
+  }),
   createCheckout: async () => ({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
@@ -220,6 +235,30 @@ describe("vault API persistence", () => {
     expect(documents.headers["cache-control"]).toBe("no-store");
     expect(documents.body).not.toContain("objectKey");
     expect(documents.body).not.toContain("wrapped");
+  });
+
+  it("authorizes and returns a bounded verified audit page without caching", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/v1/audit-events?afterSequence=0&limit=25",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toMatchObject({
+      events: [{ sequence: 1, action: "vault.fact.confirm" }],
+      nextSequence: null,
+    });
+    expect(
+      authorizationScopes.filter(
+        (scope) => scope.purpose === "vault.audit.read",
+      ),
+    ).toEqual([
+      {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.audit.read",
+      },
+    ]);
   });
 
   it("creates and replays an encrypted candidate fact then confirms it optimistically", async () => {

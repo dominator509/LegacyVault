@@ -11,6 +11,11 @@ export interface AuditTenantContext {
   householdId: string;
 }
 
+export interface VerifiedAuditPage {
+  events: ChainedAuditEvent[];
+  nextSequence: number | null;
+}
+
 export class PostgresAuditStore {
   readonly #pool: pg.Pool;
   constructor(
@@ -134,6 +139,71 @@ export class PostgresAuditStore {
         })),
         this.auditKey,
       );
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async readVerified(
+    context: AuditTenantContext,
+    input: { afterSequence: number; limit: number },
+  ): Promise<VerifiedAuditPage> {
+    if (!Number.isSafeInteger(input.afterSequence) || input.afterSequence < 0)
+      throw new Error("audit sequence is invalid");
+    if (
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 100
+    )
+      throw new Error("audit page limit is invalid");
+    const client = await this.#pool.connect();
+    try {
+      await client.query("begin isolation level repeatable read read only");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [context.organizationId, context.householdId],
+      );
+      const result = await client.query<{
+        organization_id: string;
+        household_id: string;
+        sequence: number;
+        occurred_at: Date;
+        actor_pseudonym: string;
+        action: string;
+        outcome: string;
+        metadata: Record<string, string | number | boolean | null>;
+        previous_hash: string;
+        event_hash: string;
+      }>("select * from audit_events order by sequence");
+      const events = result.rows.map((row) => ({
+        organizationId: row.organization_id,
+        householdId: row.household_id,
+        sequence: row.sequence,
+        occurredAt: row.occurred_at.toISOString(),
+        actorPseudonym: row.actor_pseudonym,
+        action: row.action,
+        outcome: row.outcome,
+        metadata: row.metadata,
+        previousHash: row.previous_hash,
+        eventHash: row.event_hash,
+      }));
+      if (!verifyAuditChain(events, this.auditKey))
+        throw new Error("audit chain verification failed");
+      const available = events.filter(
+        (event) => event.sequence > input.afterSequence,
+      );
+      const page = available.slice(0, input.limit);
+      await client.query("commit");
+      return {
+        events: page,
+        nextSequence:
+          available.length > page.length
+            ? (page.at(-1)?.sequence ?? null)
+            : null,
+      };
     } catch (error) {
       await client.query("rollback");
       throw error;

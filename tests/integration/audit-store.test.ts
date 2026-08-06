@@ -60,6 +60,15 @@ describe("real append-only PostgreSQL audit chain", () => {
     expect(first.sequence).toBe(1);
     expect(second.previousHash).toBe(first.eventHash);
     await expect(store.verify(context)).resolves.toBe(true);
+    await expect(
+      store.readVerified(context, { afterSequence: 0, limit: 1 }),
+    ).resolves.toEqual({
+      events: [first],
+      nextSequence: 1,
+    });
+    await expect(
+      store.readVerified(context, { afterSequence: 1, limit: 100 }),
+    ).resolves.toEqual({ events: [second], nextSequence: null });
 
     const client = createDatabaseClient(databaseUrl);
     await client.connect();

@@ -243,3 +243,7 @@
 2026-08-06T03:26:23Z | codex | EP-004 | HYPOTHESIS | advance_the_existing_optimistic_manual_extraction_fixture_from_version_3_to_4_without_weakening_the_version_check
 2026-08-06T03:26:23Z | codex | EP-004 | HEARTBEAT | document_specific_RLS_consent_explicit_retention_choice_derivative_before_retryable_original_deletion_real_PostgreSQL_MinIO_ClamAV_OCR_pipeline_focused_17_tests_type_security_ok
 2026-08-06T03:28:37Z | codex | EP-004 | HEARTBEAT | document_privacy_checkpoint_migration_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:32:03Z | codex | EP-004 | SIG | initial_SPEC003_route_inventory_exit_1_shell_quoted_method_pattern_produced_no_output
+2026-08-06T03:32:03Z | codex | EP-004 | HYPOTHESIS | inventory_literal_v1_route_fragments_and_read_SPEC003_with_the_verified_cmd_type_bridge
+2026-08-06T03:32:03Z | codex | EP-004 | HEARTBEAT | owner_authorized_no_store_bounded_audit_page_full_chain_verified_repeatable_read_pseudonymized_internal_tenant_ids_stripped_focused_17_tests_format_type_security_ok
+2026-08-06T03:34:15Z | codex | EP-004 | HEARTBEAT | audit_events_checkpoint_unit_41_integration_56_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

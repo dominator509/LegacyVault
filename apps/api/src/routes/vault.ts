@@ -153,6 +153,10 @@ export async function registerVaultRoutes(
     listVaultDocuments?: (
       identity: AuthenticatedTenantIdentity,
     ) => Promise<readonly unknown[]>;
+    listAuditEvents?: (
+      identity: AuthenticatedTenantIdentity,
+      input: { afterSequence: number; limit: number },
+    ) => Promise<unknown>;
     createReport?: (
       identity: AuthenticatedTenantIdentity,
       kind: ReportKind,
@@ -424,6 +428,45 @@ export async function registerVaultRoutes(
       });
     const documents = await dependencies.listVaultDocuments(identity);
     return reply.header("cache-control", "no-store").send({ documents });
+  });
+
+  server.get("/v1/audit-events", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.listAuditEvents)
+      throw new ApiProblem(
+        503,
+        "Audit unavailable",
+        "Audit retrieval is not configured.",
+      );
+    const query = request.query as {
+      afterSequence?: string;
+      limit?: string;
+    };
+    const afterSequence = Number(query.afterSequence ?? 0);
+    const limit = Number(query.limit ?? 50);
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "afterSequence must be a non-negative integer",
+      );
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "limit must be between 1 and 100",
+      );
+    await dependencies.authorizeIdentity?.(identity, {
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.audit.read",
+    });
+    return reply.header("cache-control", "no-store").send(
+      await dependencies.listAuditEvents(identity, {
+        afterSequence,
+        limit,
+      }),
+    );
   });
 
   server.post("/v1/documents", async (request, reply) => {
