@@ -221,3 +221,11 @@
 2026-08-06T02:56:53Z | codex | EP-004 | HEARTBEAT | authorized_category_filtered_post_policy_fact_decryption_no_store_document_metadata_only_reads_no_object_wrapped_or_ciphertext_material_unit_41_integration_54_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
 2026-08-06T02:56:53Z | codex | EP-004 | SIG | requested_scoped_formatter_scripts_format_sh_exit_127_no_such_file_while_later_composite_type_integration_security_and_diff_checks_passed
 2026-08-06T02:56:53Z | codex | EP-004 | HYPOTHESIS | use_the_exact_COMMANDS_declared_prettier_write_scope_then_run_format_check_instead_of_the_nonexistent_script
+2026-08-06T03:06:50Z | codex | EP-004 | SIG | read_only_PowerShell_source_inspection_exit_1_outer_shell_expanded_local_variables_before_file_read
+2026-08-06T03:06:50Z | codex | EP-004 | HYPOTHESIS | use_the_verified_rtk_sed_reader_for_bounded_source_ranges_on_this_Windows_shell_bridge
+2026-08-06T03:06:50Z | codex | EP-004 | SIG | export_authority_search_exit_1_Windows_invalid_root_glob_and_nonexistent_assumed_legal_operations_paths
+2026-08-06T03:06:50Z | codex | EP-004 | HYPOTHESIS | search_from_the_existing_repository_root_with_markdown_globs_and_exclude_dependency_trees
+2026-08-06T03:06:50Z | codex | EP-004 | SIG | first_export_retrieval_format_check_exit_1_runtime_style_only_while_type_API_15_tests_and_security_passed
+2026-08-06T03:06:50Z | codex | EP-004 | HYPOTHESIS | run_the_exact_COMMANDS_declared_formatter_then_rerun_format_type_real_MinIO_and_security_gates
+2026-08-06T03:06:50Z | codex | EP-004 | HEARTBEAT | authorized_no_store_export_status_completed_only_five_minute_S3_download_safe_filename_digest_signer_no_object_key_real_MinIO_round_trip_focused_18_tests_format_type_security_ok
+2026-08-06T03:09:07Z | codex | EP-004 | HEARTBEAT | export_delivery_checkpoint_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

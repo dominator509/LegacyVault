@@ -219,6 +219,17 @@ describe("composed application runtime", () => {
       expect(
         JSON.stringify(persisted.rows[0]?.wrapped_export_key),
       ).not.toContain(exportKey.toString("base64"));
+      const pendingExport = await runtime.dependencies.getPortableExport?.(
+        identity,
+        started?.export.id ?? "",
+      );
+      expect(pendingExport).toMatchObject({
+        id: started?.export.id,
+        status: "pending",
+        version: 1,
+      });
+      expect(JSON.stringify(pendingExport)).not.toContain("objectKey");
+      expect(JSON.stringify(pendingExport)).not.toContain("wrapped");
 
       const plaintext = Buffer.from('{"carrier":"Runtime Mutual"}');
       const encrypted = await runtime.dependencies.encryptFactValue?.(

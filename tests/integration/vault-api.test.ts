@@ -33,6 +33,7 @@ let observedAiInterview: unknown;
 let observedDocumentUpload: unknown;
 let observedReportId: string | undefined;
 let observedFactCategories: readonly string[] = [];
+const completedExportId = randomUUID();
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
@@ -47,6 +48,19 @@ const server = buildServer({
       workflow: { id: randomUUID(), status: "pending", version: 1 },
     };
   },
+  getPortableExport: async (_resolved, exportId) =>
+    exportId === completedExportId
+      ? {
+          id: exportId,
+          status: "completed",
+          archiveSha256: "a".repeat(64),
+          signerPublicKey: "test-public-key",
+          completedAt: "2026-08-06T00:00:00.000Z",
+          version: 2,
+          downloadUrl: `http://127.0.0.1/export/${exportId}`,
+          downloadExpiresInSeconds: 300,
+        }
+      : null,
   confirmPrivacyDeletion: async (resolved, input) =>
     repository.confirmPrivacyDeletion(resolved, {
       ...input,
@@ -509,6 +523,28 @@ describe("vault API persistence", () => {
     );
     const exportScopes = authorizationScopes.filter(
       (scope) => scope.purpose === "vault.export.create",
+    );
+    expect(exportScopes).toHaveLength(13);
+    expect(exportScopes.every((scope) => scope.action === "export")).toBe(true);
+  });
+
+  it("authorizes non-cacheable completed export retrieval without exposing object keys", async () => {
+    const retrieved = await server.inject({
+      method: "GET",
+      url: `/v1/exports/${completedExportId}`,
+    });
+    expect(retrieved.statusCode).toBe(200);
+    expect(retrieved.headers["cache-control"]).toBe("no-store");
+    expect(retrieved.json()).toMatchObject({
+      id: completedExportId,
+      status: "completed",
+      archiveSha256: "a".repeat(64),
+      signerPublicKey: "test-public-key",
+      downloadExpiresInSeconds: 300,
+    });
+    expect(retrieved.body).not.toContain("objectKey");
+    const exportScopes = authorizationScopes.filter(
+      (scope) => scope.purpose === "vault.export.read",
     );
     expect(exportScopes).toHaveLength(13);
     expect(exportScopes.every((scope) => scope.action === "export")).toBe(true);

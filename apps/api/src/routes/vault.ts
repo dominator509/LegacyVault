@@ -118,6 +118,10 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       input: { idempotencyKey: string; exportKey: Uint8Array },
     ) => Promise<unknown>;
+    getPortableExport?: (
+      identity: AuthenticatedTenantIdentity,
+      exportId: string,
+    ) => Promise<unknown | null>;
     confirmPrivacyDeletion?: (
       identity: AuthenticatedTenantIdentity,
       input: {
@@ -1314,6 +1318,34 @@ export async function registerVaultRoutes(
       exportKey.fill(0);
     }
   });
+
+  server.get<{ Params: { id: string } }>(
+    "/v1/exports/:id",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "export id is invalid");
+      if (!dependencies.getPortableExport)
+        throw new ApiProblem(
+          503,
+          "Export unavailable",
+          "Export retrieval is not configured.",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "export",
+          purpose: "vault.export.read",
+        });
+      const portableExport = await dependencies.getPortableExport(
+        identity,
+        request.params.id,
+      );
+      if (!portableExport)
+        throw new ApiProblem(404, "Export not found", "Export not found.");
+      return reply.header("cache-control", "no-store").send(portableExport);
+    },
+  );
 
   server.get<{ Params: { id: string } }>(
     "/v1/reports/:id",

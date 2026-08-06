@@ -269,6 +269,29 @@ export function createApplicationRuntime(environment: Environment): {
         });
         return started;
       },
+      getPortableExport: async (identity, exportId) => {
+        const portableExport = await repository.getPortableExport(
+          identity,
+          exportId,
+        );
+        if (!portableExport) return null;
+        const { objectKey, archiveSha256, signerPublicKey, ...metadata } =
+          portableExport;
+        if (portableExport.status !== "completed") return metadata;
+        if (!objectKey || !archiveSha256 || !signerPublicKey)
+          throw new Error("completed portable export metadata is incomplete");
+        return {
+          ...metadata,
+          archiveSha256,
+          signerPublicKey,
+          downloadUrl: await documentObjectStore.createPresignedExportDownload({
+            objectKey,
+            downloadName: `${portableExport.id}.lvault`,
+            expiresInSeconds: 300,
+          }),
+          downloadExpiresInSeconds: 300,
+        };
+      },
       confirmPrivacyDeletion: async (identity, input) => {
         const recoveryDays = environment.DELETION_RECOVERY_DAYS ?? 30;
         const started = await repository.confirmPrivacyDeletion(identity, {

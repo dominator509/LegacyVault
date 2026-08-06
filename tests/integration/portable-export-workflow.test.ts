@@ -176,6 +176,19 @@ describe("real portable export workflow", () => {
     expect(Buffer.from(recoveredHouseholdKey)).toEqual(
       Buffer.from(householdKey.plaintextKey),
     );
+    const downloadUrl = await objectStore.createPresignedExportDownload({
+      objectKey,
+      downloadName: `${started.export.id}.lvault`,
+      expiresInSeconds: 300,
+    });
+    const downloaded = await fetch(downloadUrl);
+    expect(downloaded.status).toBe(200);
+    expect(downloaded.headers.get("content-type")).toContain(
+      "application/vnd.legacy-vault.encrypted+json",
+    );
+    expect(Buffer.from(await downloaded.arrayBuffer())).toEqual(
+      Buffer.from(archive),
+    );
     await objectStore.deleteObject(objectKey);
     recoveredHouseholdKey.fill(0);
     householdKey.plaintextKey.fill(0);

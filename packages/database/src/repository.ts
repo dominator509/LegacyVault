@@ -45,6 +45,17 @@ export interface StartedPortableExport {
   export: { id: string; status: string; version: number };
   workflow: { id: string; status: string; version: number };
 }
+
+export interface PortableExportReadModel {
+  id: string;
+  status: string;
+  objectKey: string | null;
+  archiveSha256: string | null;
+  signerPublicKey: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  version: number;
+}
 export interface PortableExportBuildInput {
   exportId: string;
   workflowId: string;
@@ -2150,6 +2161,39 @@ export class VaultRepository {
           mediaType: document.media_type,
           encryptionKeyVersion: document.encryption_key_version,
         })),
+      };
+    });
+  }
+
+  async getPortableExport(
+    context: TenantContext,
+    exportId: string,
+  ): Promise<PortableExportReadModel | null> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        status: string;
+        object_key: string | null;
+        archive_sha256: string | null;
+        signer_public_key: string | null;
+        created_at: Date;
+        completed_at: Date | null;
+        version: number;
+      }>(
+        "select id,status,object_key,archive_sha256,signer_public_key,created_at,completed_at,version from exports where id=$1",
+        [exportId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        status: row.status,
+        objectKey: row.object_key,
+        archiveSha256: row.archive_sha256,
+        signerPublicKey: row.signer_public_key,
+        createdAt: row.created_at.toISOString(),
+        completedAt: row.completed_at?.toISOString() ?? null,
+        version: row.version,
       };
     });
   }

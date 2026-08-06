@@ -549,6 +549,31 @@ export class DocumentObjectStore {
     );
   }
 
+  async createPresignedExportDownload(input: {
+    objectKey: string;
+    downloadName: string;
+    expiresInSeconds: number;
+  }): Promise<string> {
+    if (!/^exports\/[0-9a-f-]{36}\.lvault$/iu.test(input.objectKey))
+      throw new ObjectIntegrityError("export object key is invalid");
+    if (!/^[0-9a-f-]{36}\.lvault$/iu.test(input.downloadName))
+      throw new ObjectIntegrityError("export download name is invalid");
+    if (input.expiresInSeconds < 30 || input.expiresInSeconds > 900)
+      throw new ObjectIntegrityError(
+        "download expiry must be between 30 and 900 seconds",
+      );
+    return getSignedUrl(
+      this.#client,
+      new GetObjectCommand({
+        Bucket: this.config.bucket,
+        Key: input.objectKey,
+        ResponseContentType: "application/vnd.legacy-vault.encrypted+json",
+        ResponseContentDisposition: `attachment; filename="${input.downloadName}"`,
+      }),
+      { expiresIn: input.expiresInSeconds },
+    );
+  }
+
   async putDocumentDerivative(input: {
     objectKey: string;
     ciphertext: Uint8Array;

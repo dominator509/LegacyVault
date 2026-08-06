@@ -29,6 +29,10 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     input: { idempotencyKey: string; exportKey: Uint8Array },
   ) => Promise<StartedPortableExport>;
+  getPortableExport?: (
+    identity: AuthenticatedTenantIdentity,
+    exportId: string,
+  ) => Promise<unknown | null>;
   confirmPrivacyDeletion?: (
     identity: AuthenticatedTenantIdentity,
     input: {
@@ -142,6 +146,7 @@ export function buildServer(dependencies?: ServerDependencies) {
     (!dependencies?.auth ||
       !dependencies.authorizeIdentity ||
       !dependencies.startPortableExport ||
+      !dependencies.getPortableExport ||
       !dependencies.confirmPrivacyDeletion ||
       !dependencies.cancelPrivacyDeletion ||
       !dependencies.encryptFactValue ||
