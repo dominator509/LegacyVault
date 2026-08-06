@@ -29,28 +29,6 @@ interface MailpitSummary {
   To: { Address: string }[];
 }
 
-function imageOnlyPdf(): Buffer {
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>",
-    "<< /Length 35 >>\nstream\nq\n200 0 0 200 0 0 cm\n/Im0 Do\nQ\nendstream",
-    "<< /Type /XObject /Subtype /Image /Width 2 /Height 2 /ColorSpace /DeviceGray /BitsPerComponent 8 /Filter /ASCIIHexDecode /Length 9 >>\nstream\n00FFFFFF>\nendstream",
-  ];
-  let pdf = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(pdf));
-    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xref = Buffer.byteLength(pdf);
-  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  for (const offset of offsets.slice(1))
-    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
-  return Buffer.from(pdf);
-}
-
 const local = readLocalEnvironment();
 const objectStoreEndpoint = local.R2_ENDPOINT;
 if (!objectStoreEndpoint)
@@ -315,7 +293,10 @@ describe("composed application runtime", () => {
         }),
       ]);
 
-      const documentPlaintext = imageOnlyPdf();
+      const documentPlaintext = Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAALklEQVR4nO3OMQEAAAjDsIF/z0MGT2qgmbb5bF/vAAAAAAAAAAAAAAAAAAAASQ5AtAM9yMAItAAAAABJRU5ErkJggg==",
+        "base64",
+      );
       const documentIdempotencyKey = `runtime-document-${randomUUID()}`;
       const documentUpload = await runtime.dependencies.startDocumentUpload?.(
         identity,
@@ -324,7 +305,7 @@ describe("composed application runtime", () => {
           originalSha256: createHash("sha256")
             .update(documentPlaintext)
             .digest("hex"),
-          mediaType: "application/pdf",
+          mediaType: "image/png",
           maximumBytes: 1024 * 1024,
         },
       );
@@ -336,7 +317,7 @@ describe("composed application runtime", () => {
           originalSha256: createHash("sha256")
             .update(documentPlaintext)
             .digest("hex"),
-          mediaType: "application/pdf",
+          mediaType: "image/png",
           maximumBytes: 1024 * 1024,
         },
       );
@@ -623,5 +604,5 @@ describe("composed application runtime", () => {
     } finally {
       await client.end();
     }
-  });
+  }, 20_000);
 });

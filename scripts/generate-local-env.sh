@@ -32,7 +32,7 @@ export_key=$(openssl genpkey -algorithm ED25519 -outform DER 2>/dev/null | opens
   printf '%s\n' 'WORKFLOW_QUEUE_NAME=legacy-workflows-development'
   printf 'LOCAL_S3_ACCESS_KEY=%s\nLOCAL_S3_SECRET_KEY=%s\n' "$s3_access" "$s3_secret"
   printf 'R2_ACCOUNT_ID=local\nR2_ACCESS_KEY_ID=%s\nR2_SECRET_ACCESS_KEY=%s\nR2_BUCKET=legacy-vault-local\nR2_ENDPOINT=http://127.0.0.1:19000\n' "$s3_access" "$s3_secret"
-  printf '%s\n' 'CLAMAV_HOST=127.0.0.1' 'CLAMAV_PORT=13310' 'OCR_EXECUTABLE='
+  printf '%s\n' 'CLAMAV_HOST=127.0.0.1' 'CLAMAV_PORT=13310' 'OCR_EXECUTABLE=' 'OCR_PYTHON_EXECUTABLE='
   printf 'APP_ENCRYPTION_KEK=%s\nSESSION_SECRET=%s\nAUDIT_HMAC_KEY=%s\nEXPORT_SIGNING_KEY=%s\n' "$encryption_kek" "$session_secret" "$audit_key" "$export_key"
   printf '%s\n' 'DEEPSEEK_API_KEY=' 'DEEPSEEK_BASE_URL=https://api.deepseek.com' 'DEEPSEEK_MODEL=deepseek-v4-flash'
   printf '%s\n' 'STRIPE_SECRET_KEY=' 'STRIPE_WEBHOOK_SECRET=' 'STRIPE_PRICE_ESSENTIAL='

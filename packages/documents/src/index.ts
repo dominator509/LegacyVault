@@ -207,54 +207,157 @@ export class ClamAvScanner {
 
 export class OcrMyPdfAdapter {
   constructor(
-    private readonly config: { executable: string; timeoutMs: number },
+    private readonly config: {
+      executable: string;
+      pythonExecutable: string;
+      timeoutMs: number;
+    },
   ) {}
 
-  async extractSearchablePdf(input: Uint8Array): Promise<Uint8Array> {
-    validateDocumentBytes({
+  async extractSearchablePdf(
+    input: Uint8Array,
+    declaredMediaType = "application/pdf",
+  ): Promise<Uint8Array> {
+    const mediaType = validateDocumentBytes({
       bytes: input,
-      declaredMediaType: "application/pdf",
+      declaredMediaType,
       maximumBytes: 100 * 1024 * 1024,
     });
     const directory = await mkdtemp(join(tmpdir(), "legacy-vault-ocr-"));
-    const source = join(directory, "source.pdf");
+    const source = join(directory, documentSourceName(mediaType));
+    const normalized = join(directory, "normalized.pdf");
+    const normalizer = join(directory, "normalize.py");
     const output = join(directory, "output.pdf");
     try {
       await writeFile(source, input, { mode: 0o600 });
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(
-          this.config.executable,
-          ["--skip-text", "--output-type", "pdf", "--", source, output],
-          {
-            shell: false,
-            windowsHide: true,
-            stdio: ["ignore", "ignore", "pipe"],
-          },
-        );
-        let diagnostic = "";
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk: string) => {
-          if (diagnostic.length < 2_000) diagnostic += chunk;
-        });
-        const timer = setTimeout(() => child.kill(), this.config.timeoutMs);
-        child.once("error", (error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
-        child.once("exit", (code, signal) => {
-          clearTimeout(timer);
-          if (code === 0) resolve();
-          else
-            reject(
-              new Error(`OCR failed (${signal ?? code}): ${diagnostic.trim()}`),
-            );
-        });
-      });
+      await writeFile(normalizer, documentNormalizer, { mode: 0o600 });
+      await runBoundedProcess(
+        this.config.pythonExecutable,
+        [normalizer, mediaType, source, normalized],
+        this.config.timeoutMs,
+        "document normalization",
+      );
+      await runBoundedProcess(
+        this.config.executable,
+        ocrArguments(
+          "application/pdf",
+          mediaType === "application/pdf" ? source : normalized,
+          output,
+        ),
+        this.config.timeoutMs,
+        "OCR",
+      );
       return new Uint8Array(await readFile(output));
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   }
+}
+
+const documentNormalizer = String.raw`import sys
+import warnings
+from PIL import Image, ImageSequence
+import pikepdf
+
+media_type, source, output = sys.argv[1:5]
+maximum_pages = 100
+if media_type == "application/pdf":
+    with pikepdf.open(source) as document:
+        if len(document.pages) > maximum_pages:
+            raise ValueError("document exceeds the configured page limit")
+else:
+    Image.MAX_IMAGE_PIXELS = 50_000_000
+    warnings.simplefilter("error", Image.DecompressionBombWarning)
+    frames = []
+    with Image.open(source) as image:
+        for index, frame in enumerate(ImageSequence.Iterator(image)):
+            if index >= maximum_pages:
+                raise ValueError("document exceeds the configured page limit")
+            normalized = frame.convert("RGB")
+            normalized.load()
+            frames.append(normalized.copy())
+    if not frames:
+        raise ValueError("document contains no image frames")
+    frames[0].save(
+        output,
+        "PDF",
+        save_all=True,
+        append_images=frames[1:],
+        resolution=300,
+    )
+    for frame in frames:
+        frame.close()
+`;
+
+async function runBoundedProcess(
+  executable: string,
+  arguments_: string[],
+  timeoutMs: number,
+  operation: string,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(executable, arguments_, {
+      shell: false,
+      windowsHide: true,
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let diagnostic = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => {
+      if (diagnostic.length < 2_000) diagnostic += chunk;
+    });
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("exit", (code, signal) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else
+        reject(
+          new Error(
+            `${operation} failed (${signal ?? code}): ${diagnostic.trim()}`,
+          ),
+        );
+    });
+  });
+}
+
+function documentSourceName(mediaType: SupportedDocumentType): string {
+  switch (mediaType) {
+    case "application/pdf":
+      return "source.pdf";
+    case "image/jpeg":
+      return "source.jpg";
+    case "image/png":
+      return "source.png";
+    case "image/tiff":
+      return "source.tiff";
+  }
+}
+
+function ocrArguments(
+  mediaType: SupportedDocumentType,
+  source: string,
+  output: string,
+): string[] {
+  return [
+    "--jobs",
+    "2",
+    "--max-image-mpixels",
+    "50",
+    "--tesseract-timeout",
+    "60",
+    ...(mediaType === "application/pdf"
+      ? ["--skip-text"]
+      : ["--image-dpi", "300"]),
+    "--output-type",
+    "pdf",
+    "--",
+    source,
+    output,
+  ];
 }
 
 export class DockerOcrMyPdfAdapter {
@@ -271,77 +374,78 @@ export class DockerOcrMyPdfAdapter {
       );
   }
 
-  async extractSearchablePdf(input: Uint8Array): Promise<Uint8Array> {
-    validateDocumentBytes({
+  async extractSearchablePdf(
+    input: Uint8Array,
+    declaredMediaType = "application/pdf",
+  ): Promise<Uint8Array> {
+    const mediaType = validateDocumentBytes({
       bytes: input,
-      declaredMediaType: "application/pdf",
+      declaredMediaType,
       maximumBytes: 100 * 1024 * 1024,
     });
     const directory = await mkdtemp(
       join(tmpdir(), "legacy-vault-ocr-container-"),
     );
-    const source = join(directory, "source.pdf");
+    const sourceName = documentSourceName(mediaType);
+    const source = join(directory, sourceName);
+    const normalizedName = "normalized.pdf";
+    const normalizerName = "normalize.py";
     const output = join(directory, "output.pdf");
     try {
       await writeFile(source, input, { mode: 0o600 });
-      await new Promise<void>((resolve, reject) => {
-        const child = spawn(
-          this.config.dockerExecutable,
-          [
-            "run",
-            "--rm",
-            "--network",
-            "none",
-            "--read-only",
-            "--security-opt",
-            "no-new-privileges",
-            "--pids-limit",
-            "256",
-            "--memory",
-            "1g",
-            "--cpus",
-            "2",
-            "--tmpfs",
-            "/tmp:rw,noexec,nosuid,size=512m",
-            "--volume",
-            `${directory}:/work`,
-            "--workdir",
-            "/work",
-            this.config.image,
-            "--skip-text",
-            "--output-type",
-            "pdf",
-            "--",
-            "source.pdf",
-            "output.pdf",
-          ],
-          {
-            shell: false,
-            windowsHide: true,
-            stdio: ["ignore", "ignore", "pipe"],
-          },
-        );
-        let diagnostic = "";
-        child.stderr.setEncoding("utf8");
-        child.stderr.on("data", (chunk: string) => {
-          if (diagnostic.length < 2_000) diagnostic += chunk;
-        });
-        const timer = setTimeout(() => child.kill(), this.config.timeoutMs);
-        child.once("error", (error) => {
-          clearTimeout(timer);
-          reject(error);
-        });
-        child.once("exit", (code, signal) => {
-          clearTimeout(timer);
-          if (code === 0) resolve();
-          else
-            reject(
-              new Error(
-                `container OCR failed (${signal ?? code}): ${diagnostic.trim()}`,
-              ),
-            );
-        });
+      await writeFile(join(directory, normalizerName), documentNormalizer, {
+        mode: 0o600,
       });
+      const containerPrefix = [
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        "256",
+        "--memory",
+        "1g",
+        "--cpus",
+        "2",
+        "--tmpfs",
+        "/tmp:rw,noexec,nosuid,size=512m",
+        "--volume",
+        `${directory}:/work`,
+        "--workdir",
+        "/work",
+      ];
+      await runBoundedProcess(
+        this.config.dockerExecutable,
+        [
+          ...containerPrefix,
+          "--entrypoint",
+          "python3",
+          this.config.image,
+          normalizerName,
+          mediaType,
+          sourceName,
+          normalizedName,
+        ],
+        this.config.timeoutMs,
+        "container document normalization",
+      );
+      await runBoundedProcess(
+        this.config.dockerExecutable,
+        [
+          ...containerPrefix,
+          this.config.image,
+          ...ocrArguments(
+            "application/pdf",
+            mediaType === "application/pdf" ? sourceName : normalizedName,
+            "output.pdf",
+          ),
+        ],
+        this.config.timeoutMs,
+        "container OCR",
+      );
       return new Uint8Array(await readFile(output));
     } finally {
       await rm(directory, { recursive: true, force: true });

@@ -167,3 +167,14 @@
 2026-08-06T00:16:09Z | codex | EP-004 | SIG | lint_TS2379_gateway_environment_exact_optional_properties_and_format_provider_style_security_boundary_ok
 2026-08-06T00:16:09Z | codex | EP-004 | HYPOTHESIS | admit_explicit_undefined_from_validated_environment_shape_then_run_authorized_formatter
 2026-08-06T00:19:21Z | codex | EP-004 | HEARTBEAT | worker_ready_isolated_queue_consent_bound_DeepSeek_interview_models_probe_live_fire_2_unit_36_integration_39_e2e_2_build_format_security_audit_smoke_ok
+2026-08-06T00:29:01Z | codex | EP-004 | SIG | control_plane_read_diagnostics_exit_1_bat_unavailable_and_two_requested_nonexistent_spec_paths_then_rg_received_nonexistent_glob_paths
+2026-08-06T00:29:01Z | codex | EP-004 | HYPOTHESIS | use_available_PowerShell_read_and_rg_files_to_resolve_actual_materialized_specs_without_changing_project_content
+2026-08-06T00:29:01Z | codex | EP-004 | SIG | raster_OCR_integration_exit_1_OCRmyPDF_rejected_alpha_channel_PNG
+2026-08-06T00:29:01Z | codex | EP-004 | HYPOTHESIS | normalize_images_to_metadata_free_RGB_PDF_inside_the_same_bounded_runtime_with_explicit_pixel_and_page_limits
+2026-08-06T00:29:01Z | codex | EP-004 | SIG | normalized_raster_test_exit_1_twice_because_hand_transcribed_one_pixel_PNG_fixture_was_truncated
+2026-08-06T00:29:01Z | codex | EP-004 | HYPOTHESIS | generate_a_deterministic_valid_alpha_PNG_with_the_exact_pinned_Pillow_runtime_then_preserve_it_as_the_fixture
+2026-08-06T00:29:01Z | codex | EP-004 | HEARTBEAT | bounded_PDF_page_validation_and_raster_RGB_normalization_real_OCR_2_tests_full_scan_to_encrypted_derivative_integration_2_tests_ok
+2026-08-06T00:33:15Z | codex | EP-004 | SIG | full_integration_exit_1_application_runtime_multi_service_test_exceeded_default_5_second_budget_under_parallel_suite_load_while_unit_37_e2e_2_build_format_security_audit_smoke_ok
+2026-08-06T00:33:15Z | codex | EP-004 | HYPOTHESIS | assign_the_existing_20_second_real_integration_budget_to_the_full_database_queue_storage_ClamAV_OCR_flow_then_rerun_the_complete_suite
+2026-08-06T00:33:15Z | codex | EP-004 | HEARTBEAT | raster_normalization_and_page_limit_checkpoint_unit_37_integration_41_e2e_2_build_format_security_audit_smoke_ok
+2026-08-06T00:34:14Z | codex | EP-004 | HEARTBEAT | authenticated_DeepSeek_live_fire_2_ok_after_document_pipeline_changes_credential_still_ignored_and_untracked

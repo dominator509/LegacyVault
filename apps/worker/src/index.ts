@@ -370,8 +370,6 @@ export function createDocumentOcrWorkflowHandler(input: {
       if (document.nextStep !== "ocr") return;
       if (document.status !== "clean")
         throw new Error("document has not passed malware scanning");
-      if (document.mediaType !== "application/pdf")
-        throw new Error("document OCR media type is not yet supported");
       householdKey =
         await input.householdKeyStore.getOrCreateActiveKey(context);
       dataKey = decryptEnvelope(
@@ -642,10 +640,14 @@ async function main(): Promise<void> {
       })
     : new OcrMyPdfAdapter({
         executable: environment.OCR_EXECUTABLE ?? "",
+        pythonExecutable: environment.OCR_PYTHON_EXECUTABLE ?? "",
         timeoutMs: 120_000,
       });
-  if (!environment.LOCAL_ENGINEERING_MODE && !environment.OCR_EXECUTABLE)
-    throw new Error("production OCR executable is not configured");
+  if (
+    !environment.LOCAL_ENGINEERING_MODE &&
+    (!environment.OCR_EXECUTABLE || !environment.OCR_PYTHON_EXECUTABLE)
+  )
+    throw new Error("production OCR runtime is not configured");
   const scan = createDocumentScanWorkflowHandler({
     repository,
     householdKeyStore,
