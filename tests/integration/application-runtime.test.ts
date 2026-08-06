@@ -67,6 +67,7 @@ const environment = loadEnvironment({
   APP_ENCRYPTION_KEK: local.APP_ENCRYPTION_KEK,
   EXPORT_SIGNING_KEY: local.EXPORT_SIGNING_KEY,
   REDIS_URL: local.REDIS_URL,
+  WORKFLOW_QUEUE_NAME: `legacy-runtime-test-${process.pid}`,
   API_BASE_URL: "http://127.0.0.1:3001",
   APP_BASE_URL: "http://127.0.0.1:3000",
   EMAIL_FROM: "Legacy Vault <notices@localhost.invalid>",

@@ -45,6 +45,31 @@ export interface DeepSeekConfig {
   maxRetries: number;
 }
 
+export interface DeepSeekEnvironment {
+  DEEPSEEK_API_KEY?: string | undefined;
+  DEEPSEEK_BASE_URL?: string | undefined;
+  DEEPSEEK_MODEL?: string | undefined;
+}
+
+export function createDeepSeekRuntime(environment: DeepSeekEnvironment): {
+  provider: DeepSeekProvider;
+  model: string;
+} {
+  const model = environment.DEEPSEEK_MODEL ?? "";
+  return {
+    provider: new DeepSeekProvider({
+      ...(environment.DEEPSEEK_API_KEY
+        ? { apiKey: environment.DEEPSEEK_API_KEY }
+        : {}),
+      baseUrl: environment.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com",
+      model,
+      timeoutMs: 30_000,
+      maxRetries: 2,
+    }),
+    model,
+  };
+}
+
 export class DeepSeekProvider implements AiProvider {
   readonly name = "deepseek";
   #failureCount = 0;
@@ -115,7 +140,10 @@ export class DeepSeekProvider implements AiProvider {
         const body = (await response.json()) as {
           id?: string;
           model?: string;
-          choices?: { message?: { content?: string } }[];
+          choices?: {
+            finish_reason?: string;
+            message?: { content?: string };
+          }[];
           usage?: {
             prompt_tokens?: number;
             completion_tokens?: number;
@@ -126,7 +154,7 @@ export class DeepSeekProvider implements AiProvider {
         const content = body.choices?.[0]?.message?.content;
         if (!content)
           throw new ProviderResponseError(
-            "DeepSeek response content is missing",
+            `DeepSeek response content is missing (${body.choices?.[0]?.finish_reason ?? "unknown"})`,
           );
         this.#failureCount = 0;
         return {

@@ -1,4 +1,5 @@
 import Fastify, { LogController } from "fastify";
+import { pathToFileURL } from "node:url";
 import { loadEnvironment } from "@legacy/contracts/environment";
 import type { VaultRepository } from "@legacy/database/repository";
 import {
@@ -13,6 +14,7 @@ import { createApplicationRuntime } from "./runtime.js";
 import type { AuthenticatedTenantIdentity } from "@legacy/auth";
 import type { StartedPortableExport } from "@legacy/database/repository";
 import type { StartedDocumentProcessing } from "@legacy/database/repository";
+import type { RecordCategory } from "@legacy/domain";
 
 export interface ServerDependencies {
   repository: VaultRepository;
@@ -87,6 +89,15 @@ export interface ServerDependencies {
       }[];
     },
   ) => Promise<unknown>;
+  runAiInterview?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      message: string;
+      categories: readonly RecordCategory[];
+      expectedConsentVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
 }
 
 export function buildServer(dependencies?: ServerDependencies) {
@@ -102,7 +113,8 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.startDocumentUpload ||
       !dependencies.createDocumentUploadUrl ||
       !dependencies.completeDocumentUpload ||
-      !dependencies.completeManualDocumentExtraction)
+      !dependencies.completeManualDocumentExtraction ||
+      !dependencies.runAiInterview)
   )
     throw new Error(
       "production authentication and authorization dependencies are required",
@@ -174,7 +186,10 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]?.replaceAll("\\\\", "/")}`) {
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
   main().catch((error: unknown) => {
     process.stderr.write(
       `api startup failed: ${error instanceof Error ? error.name : "unknown"}\n`,

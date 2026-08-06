@@ -171,6 +171,15 @@ export async function registerVaultRoutes(
         }[];
       },
     ) => Promise<unknown>;
+    runAiInterview?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        message: string;
+        categories: readonly RecordCategory[];
+        expectedConsentVersion: number;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
   },
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
@@ -528,6 +537,89 @@ export async function registerVaultRoutes(
       },
     );
     return reply.code(201).send(completed);
+  });
+
+  server.post("/v1/ai-settings/interview", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    const body = objectBody(request.body);
+    const key = idempotencyKey(request);
+    const message = requiredString(body, "message");
+    if (Buffer.byteLength(message) > 20_000)
+      throw new ApiProblem(400, "Invalid request", "message is too large");
+    const findings = scanDlp(message);
+    if (findings.length)
+      throw new ApiProblem(
+        400,
+        "Prohibited content",
+        `message contains prohibited ${findings.join(", ")}`,
+      );
+    if (
+      !Array.isArray(body.categories) ||
+      body.categories.length === 0 ||
+      !body.categories.every(
+        (category) =>
+          typeof category === "string" &&
+          allRecordCategories.includes(category as RecordCategory),
+      )
+    )
+      throw new ApiProblem(400, "Invalid request", "categories are invalid");
+    const categories = [...new Set(body.categories)] as RecordCategory[];
+    const expectedConsentVersion = Number(request.headers["if-match"]);
+    if (
+      !Number.isSafeInteger(expectedConsentVersion) ||
+      expectedConsentVersion < 1
+    )
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "a valid if-match consent version is required",
+      );
+    for (const category of categories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "read",
+        purpose: "vault.ai.interview",
+      });
+    if (!dependencies.runAiInterview)
+      throw new ApiProblem(
+        503,
+        "AI unavailable",
+        "External AI is not configured.",
+      );
+    try {
+      const response = await dependencies.runAiInterview(identity, {
+        message,
+        categories,
+        expectedConsentVersion,
+        idempotencyKey: key,
+      });
+      return reply.header("cache-control", "no-store").send(response);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      if (message.includes("consent"))
+        throw new ApiProblem(
+          403,
+          "AI consent required",
+          "Affirmative external AI consent is required.",
+        );
+      if (message.includes("idempotency"))
+        throw new ApiProblem(
+          409,
+          "Idempotency conflict",
+          "The idempotency key was reused with different input.",
+        );
+      if (message.includes("unavailable"))
+        throw new ApiProblem(
+          503,
+          "AI unavailable",
+          "External AI is temporarily unavailable.",
+        );
+      throw new ApiProblem(
+        502,
+        "AI response rejected",
+        "The external AI response did not pass policy validation.",
+      );
+    }
   });
 
   server.post<{ Params: { id: string } }>(

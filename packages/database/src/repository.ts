@@ -820,6 +820,30 @@ export class VaultRepository {
     });
   }
 
+  async getActiveConsent(
+    context: TenantContext,
+    input: { personId: string; purpose: string },
+  ): Promise<{ id: string; policyVersion: string; version: number } | null> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        policy_version: string;
+        version: number;
+      }>(
+        "select id,policy_version,version from consents where person_id=$1 and purpose=$2 and withdrawn_at is null order by granted_at desc,id desc limit 1",
+        [input.personId, input.purpose],
+      );
+      const row = result.rows[0];
+      return row
+        ? {
+            id: row.id,
+            policyVersion: row.policy_version,
+            version: row.version,
+          }
+        : null;
+    });
+  }
+
   async beginWorkflow(
     context: TenantContext,
     input: { kind: string; idempotencyKey: string; firstStep: string },

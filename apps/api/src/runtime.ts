@@ -15,10 +15,20 @@ import {
   type EncryptedEnvelope,
 } from "@legacy/crypto";
 import { VaultRepository } from "@legacy/database/repository";
-import { scanDlp } from "@legacy/ai-gateway";
+import {
+  AiPolicyGateway,
+  createDeepSeekRuntime,
+  scanDlp,
+  stableStringify,
+  z,
+} from "@legacy/ai-gateway";
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
 import { generateReport } from "@legacy/reports";
-import type { CandidateFact } from "@legacy/domain";
+import {
+  allRecordCategories,
+  recordCategoryFromFieldKey,
+  type CandidateFact,
+} from "@legacy/domain";
 import { DocumentObjectStore } from "@legacy/documents";
 import {
   LocalSmtpCaptureAdapter,
@@ -55,6 +65,20 @@ function storedEnvelope(value: unknown): EncryptedEnvelope {
   return envelope as EncryptedEnvelope;
 }
 
+const aiInterviewSchema = z.object({
+  candidates: z
+    .array(
+      z.object({
+        fieldKey: z.string().min(3).max(160),
+        proposedValue: z.unknown(),
+        evidenceQuote: z.string().min(1).max(500),
+        confidence: z.number().min(0).max(1),
+      }),
+    )
+    .max(20),
+  followUpQuestion: z.string().min(1).max(500).nullable(),
+});
+
 export function createApplicationRuntime(environment: Environment): {
   dependencies: ServerDependencies;
   close(): Promise<void>;
@@ -83,7 +107,10 @@ export function createApplicationRuntime(environment: Environment): {
   const applicationKek = Buffer.from(environment.APP_ENCRYPTION_KEK, "base64");
   if (applicationKek.byteLength !== 32)
     throw new Error("application encryption KEK is invalid");
-  const workflowQueue = createWorkflowQueue(environment.REDIS_URL);
+  const workflowQueue = createWorkflowQueue(
+    environment.REDIS_URL,
+    environment.WORKFLOW_QUEUE_NAME,
+  );
   const householdKeyStore = new PostgresHouseholdKeyStore(
     environment.DATABASE_URL,
     applicationKek,
@@ -152,6 +179,18 @@ export function createApplicationRuntime(environment: Environment): {
       : {}),
     timeoutMs: 10_000,
   });
+  const deepSeekRuntime = createDeepSeekRuntime(environment);
+  const deepSeek = deepSeekRuntime.provider;
+  const aiMetrics: unknown[] = [];
+  const aiGateway = new AiPolicyGateway(deepSeek, (metric) => {
+    aiMetrics.push(metric);
+    if (aiMetrics.length > 1_000) aiMetrics.shift();
+  });
+  const aiExactCache = new Map<string, unknown>();
+  const aiIdempotencyCache = new Map<
+    string,
+    { requestHash: string; response: unknown }
+  >();
   return {
     dependencies: {
       repository,
@@ -481,6 +520,118 @@ export function createApplicationRuntime(environment: Environment): {
           for (const plaintext of plaintextValues) plaintext.fill(0);
           householdKey.plaintextKey.fill(0);
         }
+      },
+      runAiInterview: async (identity, input) => {
+        if (!deepSeek.readiness().configured)
+          throw new Error("AI provider is unavailable");
+        const consent = await repository.getActiveConsent(identity, {
+          personId: identity.actorId,
+          purpose: "external-ai",
+        });
+        if (!consent || consent.version !== input.expectedConsentVersion)
+          throw new Error("affirmative external AI consent is required");
+        const categories = [...new Set(input.categories)].sort();
+        if (
+          categories.length === 0 ||
+          !categories.every((category) =>
+            allRecordCategories.includes(category),
+          )
+        )
+          throw new Error("AI categories are invalid");
+        const envelope = {
+          promptFamily: "interview-assistance",
+          promptVersion: "v1",
+          globalPolicy:
+            "Return evidence-linked candidate suggestions only. Never state that a candidate is confirmed. Never request or reproduce passwords, PINs, recovery codes, seed phrases, private keys, full payment card numbers, complete Social Security numbers, authentication answers, or safe combinations.",
+          taskPolicy:
+            "Use only the supplied message. Return JSON with candidates and one nullable followUpQuestion. Each candidate needs a canonical fieldKey, proposedValue, an exact short evidenceQuote from the message, and confidence from 0 to 1.",
+          outputSchema: {
+            candidates: [
+              {
+                fieldKey: "insurance.carrier",
+                proposedValue: "string or structured JSON value",
+                evidenceQuote: "exact supporting words",
+                confidence: 0.9,
+              },
+            ],
+            followUpQuestion: "string or null",
+          },
+          safeHouseholdCapsule: {
+            allowedCategories: categories,
+            authoritativeStatus: "candidate-only",
+          },
+          content: stableStringify({ categories, message: input.message }),
+        };
+        const requestHash = createHash("sha256")
+          .update(stableStringify({ categories, message: input.message }))
+          .digest("hex");
+        const idempotencyCacheKey = stableStringify({
+          organizationId: identity.organizationId,
+          householdId: identity.householdId,
+          idempotencyKey: input.idempotencyKey,
+        });
+        const idempotent = aiIdempotencyCache.get(idempotencyCacheKey);
+        if (idempotent) {
+          if (idempotent.requestHash !== requestHash)
+            throw new Error("AI idempotency key conflict");
+          return idempotent.response;
+        }
+        const exactCacheKey = aiGateway.cacheKey({
+          organizationId: identity.organizationId,
+          householdId: identity.householdId,
+          envelope,
+        });
+        let parsed = aiExactCache.get(exactCacheKey) as
+          z.infer<typeof aiInterviewSchema> | undefined;
+        if (!parsed) {
+          parsed = await aiGateway.execute({
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            purpose: "interview-assistance",
+            consentGranted: true,
+            envelope,
+            schema: aiInterviewSchema,
+            mode: "standard",
+            model: deepSeekRuntime.model,
+            maxOutputTokens: 1_024,
+            estimatedInputCostPerMillion: 0,
+            estimatedOutputCostPerMillion: 0,
+          });
+          for (const candidate of parsed.candidates) {
+            const category = recordCategoryFromFieldKey(candidate.fieldKey);
+            if (!categories.includes(category))
+              throw new Error("AI output exceeded allowed categories");
+          }
+          const outputFindings = scanDlp(stableStringify(parsed)).filter(
+            (finding) => finding !== "prompt-injection",
+          );
+          if (outputFindings.length)
+            throw new Error("AI output contains prohibited content");
+          aiExactCache.set(exactCacheKey, parsed);
+          if (aiExactCache.size > 1_000)
+            aiExactCache.delete(aiExactCache.keys().next().value ?? "");
+        }
+        const response = {
+          provider: "deepseek" as const,
+          model: deepSeekRuntime.model,
+          consent: {
+            id: consent.id,
+            policyVersion: consent.policyVersion,
+            version: consent.version,
+          },
+          categoriesSent: categories,
+          authoritative: false as const,
+          ...parsed,
+        };
+        aiIdempotencyCache.set(idempotencyCacheKey, {
+          requestHash,
+          response,
+        });
+        if (aiIdempotencyCache.size > 1_000)
+          aiIdempotencyCache.delete(
+            aiIdempotencyCache.keys().next().value ?? "",
+          );
+        return response;
       },
     },
     async close() {

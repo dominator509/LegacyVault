@@ -20,6 +20,10 @@ const environmentSchema = z
     APP_ENCRYPTION_KEK: z.string().min(43).optional(),
     EXPORT_SIGNING_KEY: z.string().min(43).optional(),
     REDIS_URL: z.string().url().optional(),
+    WORKFLOW_QUEUE_NAME: z.string().min(3).max(120).default("legacy-workflows"),
+    DEEPSEEK_API_KEY: z.string().optional(),
+    DEEPSEEK_BASE_URL: z.string().url().optional(),
+    DEEPSEEK_MODEL: z.string().min(1).optional(),
     API_BASE_URL: z.string().url().optional(),
     APP_BASE_URL: z.string().url().optional(),
     EMAIL_FROM: z.string().min(3).optional(),
@@ -31,6 +35,9 @@ const environmentSchema = z
     R2_SECRET_ACCESS_KEY: z.string().optional(),
     R2_BUCKET: z.string().optional(),
     R2_ENDPOINT: z.string().url().optional(),
+    CLAMAV_HOST: z.string().min(1).optional(),
+    CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
+    OCR_EXECUTABLE: z.string().min(1).optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && value.LOCAL_ENGINEERING_MODE) {
@@ -62,6 +69,9 @@ const environmentSchema = z
       "APP_ENCRYPTION_KEK",
       "EXPORT_SIGNING_KEY",
       "REDIS_URL",
+      "DEEPSEEK_API_KEY",
+      "DEEPSEEK_BASE_URL",
+      "DEEPSEEK_MODEL",
       "RESEND_API_KEY",
       "STRIPE_SECRET_KEY",
       "STRIPE_WEBHOOK_SECRET",
@@ -70,6 +80,9 @@ const environmentSchema = z
       "R2_SECRET_ACCESS_KEY",
       "R2_BUCKET",
       "R2_ENDPOINT",
+      "CLAMAV_HOST",
+      "CLAMAV_PORT",
+      "OCR_EXECUTABLE",
     ] as const) {
       if (value.NODE_ENV === "production" && !value[field])
         context.addIssue({

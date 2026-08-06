@@ -1,24 +1,31 @@
 import { Queue, QueueEvents, Worker, type JobsOptions } from "bullmq";
 import { Redis } from "ioredis";
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import {
   decryptEnvelope,
   encryptEnvelope,
   ExportManifestSigner,
+  PostgresHouseholdKeyStore,
   type EncryptedEnvelope,
-  type PostgresHouseholdKeyStore,
 } from "@legacy/crypto";
-import type {
-  DocumentProcessingInput,
-  PortableExportBuildInput,
-  TenantContext,
+import {
+  VaultRepository,
+  type DocumentProcessingInput,
+  type PortableExportBuildInput,
+  type TenantContext,
 } from "@legacy/database/repository";
 import {
+  ClamAvScanner,
+  DockerOcrMyPdfAdapter,
+  DocumentObjectStore,
   DocumentQuarantineService,
   ObjectIntegrityError,
+  OcrMyPdfAdapter,
   type MalwareScanner,
   type QuarantineObjectStore,
 } from "@legacy/documents";
+import { loadEnvironment } from "@legacy/contracts/environment";
 import {
   createPortableExport,
   type PortableExportEntry,
@@ -110,7 +117,10 @@ export interface DocumentOcrObjectStore extends QuarantineObjectStore {
 }
 
 export interface DocumentOcrAdapter {
-  extractSearchablePdf(input: Uint8Array): Promise<Uint8Array>;
+  extractSearchablePdf(
+    input: Uint8Array,
+    mediaType?: string,
+  ): Promise<Uint8Array>;
 }
 
 function storedEnvelope(value: unknown): EncryptedEnvelope {
@@ -398,7 +408,10 @@ export function createDocumentOcrWorkflowHandler(input: {
         .digest("hex");
       if (originalDigest !== document.originalSha256)
         throw new ObjectIntegrityError("document plaintext checksum mismatch");
-      searchablePdf = await input.ocr.extractSearchablePdf(plaintext);
+      searchablePdf = await input.ocr.extractSearchablePdf(
+        plaintext,
+        document.mediaType,
+      );
       const derivativeId = document.id;
       const encryptedDerivative = Buffer.from(
         JSON.stringify(
@@ -548,12 +561,17 @@ export function enqueueWorkflow(
 
 export function createWorkflowWorker(
   redisUrl: string,
-  handlers: Readonly<Record<WorkflowJobName, WorkflowHandler>>,
+  handlers: Readonly<Partial<Record<WorkflowJobName, WorkflowHandler>>>,
   queueName = "legacy-workflows",
 ) {
   const worker = new Worker<WorkflowJobData, void, WorkflowJobName>(
     queueName,
-    async (job) => handlers[job.name](job.data),
+    async (job) => {
+      const handler = handlers[job.name];
+      if (!handler)
+        throw new Error(`workflow handler unavailable: ${job.name}`);
+      await handler(job.data);
+    },
     { connection: connection(redisUrl), concurrency: 10, lockDuration: 30_000 },
   );
   worker.on("failed", (job, error) => {
@@ -568,4 +586,120 @@ export function createWorkflowWorker(
     );
   });
   return worker;
+}
+
+async function main(): Promise<void> {
+  const environment = loadEnvironment(process.env);
+  if (
+    !environment.DATABASE_URL ||
+    !environment.REDIS_URL ||
+    !environment.APP_ENCRYPTION_KEK ||
+    !environment.EXPORT_SIGNING_KEY ||
+    !environment.R2_ACCESS_KEY_ID ||
+    !environment.R2_SECRET_ACCESS_KEY ||
+    !environment.R2_BUCKET ||
+    !environment.R2_ENDPOINT
+  )
+    throw new Error("worker runtime configuration is incomplete");
+  const applicationKek = Buffer.from(environment.APP_ENCRYPTION_KEK, "base64");
+  if (applicationKek.byteLength !== 32)
+    throw new Error("application encryption KEK is invalid");
+  const repository = new VaultRepository(environment.DATABASE_URL);
+  const householdKeyStore = new PostgresHouseholdKeyStore(
+    environment.DATABASE_URL,
+    applicationKek,
+  );
+  const objectStore = new DocumentObjectStore({
+    endpoint: environment.R2_ENDPOINT,
+    region: "auto",
+    bucket: environment.R2_BUCKET,
+    accessKeyId: environment.R2_ACCESS_KEY_ID,
+    secretAccessKey: environment.R2_SECRET_ACCESS_KEY,
+    forcePathStyle: environment.LOCAL_ENGINEERING_MODE,
+    allowBucketCreation: environment.LOCAL_ENGINEERING_MODE,
+  });
+  await objectStore.ensureBucket();
+  const scanner = new ClamAvScanner({
+    host:
+      environment.CLAMAV_HOST ??
+      (environment.LOCAL_ENGINEERING_MODE ? "127.0.0.1" : ""),
+    port:
+      environment.CLAMAV_PORT ??
+      (environment.LOCAL_ENGINEERING_MODE ? 13_310 : 0),
+    timeoutMs: 30_000,
+  });
+  if (
+    (!environment.CLAMAV_HOST || !environment.CLAMAV_PORT) &&
+    !environment.LOCAL_ENGINEERING_MODE
+  )
+    throw new Error("production ClamAV configuration is incomplete");
+  const ocr = environment.LOCAL_ENGINEERING_MODE
+    ? new DockerOcrMyPdfAdapter({
+        dockerExecutable: "docker",
+        image:
+          "jbarlow83/ocrmypdf:v17.8.1@sha256:0563a68359fe4e68022974103794a69d5d37270686f99c9030a7667ebbb639d4",
+        timeoutMs: 120_000,
+      })
+    : new OcrMyPdfAdapter({
+        executable: environment.OCR_EXECUTABLE ?? "",
+        timeoutMs: 120_000,
+      });
+  if (!environment.LOCAL_ENGINEERING_MODE && !environment.OCR_EXECUTABLE)
+    throw new Error("production OCR executable is not configured");
+  const scan = createDocumentScanWorkflowHandler({
+    repository,
+    householdKeyStore,
+    objectStore,
+    malwareScanner: scanner,
+  });
+  const recognize = createDocumentOcrWorkflowHandler({
+    repository,
+    householdKeyStore,
+    objectStore,
+    ocr,
+  });
+  const worker = createWorkflowWorker(
+    environment.REDIS_URL,
+    {
+      "document-process": async (data) => {
+        await scan(data);
+        await recognize(data);
+      },
+      "privacy-export": createPortableExportWorkflowHandler({
+        repository,
+        householdKeyStore,
+        objectStore,
+        applicationKek,
+        signingKeyPkcs8Base64: environment.EXPORT_SIGNING_KEY,
+      }),
+    },
+    environment.WORKFLOW_QUEUE_NAME,
+  );
+  const shutdown = async () => {
+    await worker.close();
+    await Promise.all([repository.close(), householdKeyStore.close()]);
+    applicationKek.fill(0);
+  };
+  process.once("SIGINT", () => void shutdown());
+  process.once("SIGTERM", () => void shutdown());
+  await worker.waitUntilReady();
+  process.stdout.write(
+    JSON.stringify({
+      service: "worker",
+      status: "ready",
+      handlers: ["document-process", "privacy-export"],
+    }) + "\n",
+  );
+}
+
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main().catch((error: unknown) => {
+    process.stderr.write(
+      `worker startup failed: ${error instanceof Error ? error.name : "unknown"}\n`,
+    );
+    process.exitCode = 1;
+  });
 }
