@@ -164,6 +164,7 @@ export function createApplicationRuntime(environment: Environment): {
     databaseUrl: environment.DATABASE_URL,
     secret: environment.SESSION_SECRET,
     baseUrl: environment.API_BASE_URL,
+    passkeyOrigin: environment.APP_BASE_URL,
     trustedOrigins: [environment.APP_BASE_URL],
     relyingPartyId: new URL(environment.APP_BASE_URL).hostname,
     production: environment.NODE_ENV === "production",

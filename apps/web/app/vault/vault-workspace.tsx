@@ -62,7 +62,8 @@ export function VaultWorkspace() {
     setBusy(true);
     setError("");
     setSuccess("");
-    const data = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const data = new FormData(form);
     const category = String(data.get("category"));
     const field = String(data.get("field"));
     try {
@@ -78,7 +79,7 @@ export function VaultWorkspace() {
         }),
       });
       setSuccess("Candidate fact added. Review it before relying on it.");
-      event.currentTarget.reset();
+      form.reset();
       await load();
     } catch (caught) {
       setError(errorMessage(caught));

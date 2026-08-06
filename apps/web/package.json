@@ -7,7 +7,9 @@
     "start": "next start"
   },
   "dependencies": {
+    "@better-auth/passkey": "1.6.26",
     "@legacy/crypto": "workspace:*",
+    "better-auth": "1.6.26",
     "next": "16.3.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"

@@ -18,6 +18,7 @@ const navigation = [
   ["Emergency access", "/emergency-access"],
   ["Privacy", "/privacy"],
   ["AI settings", "/ai-settings"],
+  ["Security", "/security"],
   ["Billing", "/billing"],
 ] as const;
 

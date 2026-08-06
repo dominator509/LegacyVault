@@ -59,7 +59,8 @@ export function MemberAdministration() {
     setBusy(true);
     setError("");
     setSuccess("");
-    const data = new FormData(e.currentTarget);
+    const form = e.currentTarget;
+    const data = new FormData(form);
     try {
       const result = await apiRequest<{
         invitation: { id: string; version: number };
@@ -75,7 +76,7 @@ export function MemberAdministration() {
       setPendingInvite(result.invitation);
       setHouseholdVersion(result.householdVersion);
       setSuccess("Invitation sent. The link expires in 72 hours.");
-      e.currentTarget.reset();
+      form.reset();
     } catch (c) {
       setError(errorMessage(c));
     } finally {

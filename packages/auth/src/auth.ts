@@ -8,6 +8,7 @@ export interface LegacyAuthConfig {
   databaseUrl: string;
   secret: string;
   baseUrl: string;
+  passkeyOrigin: string;
   trustedOrigins: readonly string[];
   relyingPartyId: string;
   production: boolean;
@@ -68,7 +69,7 @@ export function createLegacyAuthOptions(
       passkey({
         rpID: config.relyingPartyId,
         rpName: "Legacy Vault Concierge",
-        origin: config.baseUrl,
+        origin: config.passkeyOrigin,
         authenticatorSelection: {
           residentKey: "required",
           userVerification: "required",
