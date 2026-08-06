@@ -1,0 +1,122 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Immutable release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+concurrency:
+  group: staging-release
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+      STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+      STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+      STRIPE_PRICE_ESSENTIAL: ${{ vars.STRIPE_PRICE_ESSENTIAL }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+      TURNSTILE_SITE_KEY: ${{ vars.TURNSTILE_SITE_KEY }}
+      TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_APP_STAGING: ${{ vars.FLY_APP_STAGING }}
+      FLY_APP_PRODUCTION: ${{ vars.FLY_APP_PRODUCTION }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+      GHCR_OWNER: ${{ github.repository_owner }}
+      DEEPSEEK_BASE_URL: https://api.deepseek.com
+      DEEPSEEK_MODEL: deepseek-v4-flash
+      SECURITY_CONTACT: ${{ vars.SECURITY_CONTACT }}
+      PRIVACY_CONTACT: ${{ vars.PRIVACY_CONTACT }}
+      LEGAL_ENTITY_NAME: ${{ vars.LEGAL_ENTITY_NAME }}
+      LEGAL_ENTITY_ADDRESS: ${{ vars.LEGAL_ENTITY_ADDRESS }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.4.1
+          cache: pnpm
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: 0.11.25
+          python-version: "3.13"
+      - run: corepack enable
+      - run: sh scripts/install.sh
+      - run: sh scripts/generate-local-env.sh
+      - run: node scripts/materialize-ci-env.mjs
+      - run: docker compose up -d --wait
+      - run: pnpm db:migrate
+      - run: sh scripts/production-readiness-check.sh
+
+  build-sign-deploy-staging:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/legacy-vault
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_APP_STAGING: ${{ vars.FLY_APP_STAGING }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1
+      - id: api
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: api
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.RELEASE_TAG }}
+      - id: web
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: web
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ env.RELEASE_TAG }}
+      - id: worker
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: worker
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.RELEASE_TAG }}
+      - id: release
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          target: release
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}:${{ env.RELEASE_TAG }}
+      - name: Sign immutable images
+        run: |
+          cosign sign --yes "${IMAGE_PREFIX}-api@${{ steps.api.outputs.digest }}"
+          cosign sign --yes "${IMAGE_PREFIX}-web@${{ steps.web.outputs.digest }}"
+          cosign sign --yes "${IMAGE_PREFIX}-worker@${{ steps.worker.outputs.digest }}"
+          cosign sign --yes "${IMAGE_PREFIX}@${{ steps.release.outputs.digest }}"
+      - name: Deploy named staging app by digest
+        run: flyctl deploy --app "$FLY_APP_STAGING" --config fly.toml --image "${IMAGE_PREFIX}@${{ steps.release.outputs.digest }}" --strategy rolling
+      - name: Staging smoke and live-fire
+        run: |
+          sh scripts/staging-smoke.sh "https://${FLY_APP_STAGING}.fly.dev"
+          sh scripts/staging-live-fire.sh "https://${FLY_APP_STAGING}.fly.dev"

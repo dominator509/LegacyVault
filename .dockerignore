@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.github
+.agent/state
+.next
+**/.next
+**/dist
+node_modules
+**/node_modules
+coverage
+playwright-report
+test-results
+compliance/evidence
+REMOTE_SESSION_HANDOFF.md

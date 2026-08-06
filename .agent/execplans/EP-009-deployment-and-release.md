@@ -61,14 +61,16 @@ The verify sentinel is observed in this session, changed paths match this plan, 
 Re-enter from the first unchecked milestone after verifying the previous checkpoint. Use green tags and the rollback ladder. Never cross a completed node tag.
 
 # 11. Progress
-- [ ] M1 Implement bounded scope
+- [x] M1 Implement bounded scope
 - [ ] M2 Prove node behavior
 
 # 12. Surprises & Discoveries
-- None recorded.
+- The frozen container install requires the repository `.npmrc`; omitting it changes pnpm peer-install settings and correctly fails the lockfile gate.
+- Corepack's prepared package-manager cache is user-scoped, so a non-root runtime attempted a network fetch. The exact pnpm version is now installed globally during the image build.
+- A shared `PORT` made the combined release image bind Next.js and Fastify to the same socket; the fail-fast supervisor now assigns web 3000 and API 3001 explicitly.
 
 # 13. Decision Log
-- None recorded.
+- ADR-075 defines separate API, web, and worker artifacts plus the combined single-Fly-app release artifact and preserves manual production deployment.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.
