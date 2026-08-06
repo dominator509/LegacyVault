@@ -299,3 +299,9 @@
 2026-08-06T08:12:03Z | codex | EP-004 | SIG | first_document_retrieval_decision_patch_failed_on_exact_control_trace_wording_mismatch_no_file_change
 2026-08-06T08:12:03Z | codex | EP-004 | HYPOTHESIS | locate_exact_ADR_and_control_rows_then_apply_the_documented_safer_boundary_with_matching_context
 2026-08-06T08:12:03Z | codex | EP-004 | HEARTBEAT | all_category_authorized_clean_retained_document_server_decrypt_storage_tag_ciphertext_checksum_no_store_nosniff_attachment_no_key_or_object_location_real_MinIO_round_trip_buffer_zeroing_integration_69_contract_1616_type_format_security_ok
+2026-08-06T08:31:07Z | codex | EP-004 | SIG | initial_member_route_probe_exit_1_confirmed_the_previously_truncated_household_route_patch_had_not_applied_repository_only_dirty
+2026-08-06T08:31:07Z | codex | EP-004 | HYPOTHESIS | read_exact_household_route_seams_then_apply_the_member_routes_as_a_bounded_patch
+2026-08-06T08:31:07Z | codex | EP-004 | SIG | first_ADR_discovery_command_referenced_absent_docs_path_and_Windows_wildcard_exit_1_without_file_change
+2026-08-06T08:31:07Z | codex | EP-004 | HYPOTHESIS | locate_actual_DECISIONS_and_CONTROL_TRACEABILITY_files_from_the_repository_inventory
+2026-08-06T08:31:07Z | codex | EP-004 | HEARTBEAT | owner_authorized_unused_invitation_revocation_non_owner_bounded_role_change_repository_defense_optimistic_versions_idempotent_replay_revoked_token_denial_focused_real_database_vault_API_25_type_ok
+2026-08-06T08:36:17Z | codex | EP-004 | HEARTBEAT | member_administration_checkpoint_unit_45_integration_69_e2e_3_contract_38_operations_1710_cases_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok_scope_diff_8_expected_files_clean

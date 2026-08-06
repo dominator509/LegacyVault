@@ -195,6 +195,13 @@ const server = buildServer({
       key.plaintextKey.fill(0);
     }
   },
+  revokeInvitation: (resolved, input) =>
+    repository.revokeMembershipInvitation(resolved, {
+      ...input,
+      revokedAt: new Date().toISOString(),
+    }),
+  updateMemberRole: (resolved, input) =>
+    repository.updateMembershipRole(resolved, input),
   startPortableExport: async (_resolved, input) => {
     observedExportKey = input.exportKey;
     return {
@@ -494,6 +501,8 @@ describe("vault API persistence", () => {
     for (const path of [
       "/v1/households",
       "/v1/members",
+      "/v1/members/{id}/role",
+      "/v1/members/invitations/{id}/revoke",
       "/v1/facts",
       "/v1/documents",
       "/v1/documents/{id}/content",
@@ -655,6 +664,101 @@ describe("vault API persistence", () => {
     });
     expect(replay.statusCode).toBe(200);
     expect(replay.json()).toEqual(accepted.json());
+
+    const acceptedMembershipId = accepted.json<{
+      membership: { id: string };
+    }>().membership.id;
+    const roleKey = `member-role-${randomUUID()}`;
+    const roleChanged = await server.inject({
+      method: "POST",
+      url: `/v1/members/${acceptedMembershipId}/role`,
+      headers: { "idempotency-key": roleKey, "if-match": "1" },
+      payload: { role: "ReadOnlyViewer" },
+    });
+    expect(roleChanged.statusCode).toBe(200);
+    expect(roleChanged.json()).toMatchObject({
+      membership: {
+        id: acceptedMembershipId,
+        role: "ReadOnlyViewer",
+        version: 2,
+      },
+      householdVersion: 4,
+    });
+    const roleReplay = await server.inject({
+      method: "POST",
+      url: `/v1/members/${acceptedMembershipId}/role`,
+      headers: { "idempotency-key": roleKey, "if-match": "1" },
+      payload: { role: "ReadOnlyViewer" },
+    });
+    expect(roleReplay.statusCode).toBe(200);
+    expect(roleReplay.json()).toEqual(roleChanged.json());
+    const ownerRoleAssignment = await server.inject({
+      method: "POST",
+      url: `/v1/members/${acceptedMembershipId}/role`,
+      headers: {
+        "idempotency-key": `member-owner-role-${randomUUID()}`,
+        "if-match": "2",
+      },
+      payload: { role: "Owner" },
+    });
+    expect(ownerRoleAssignment.statusCode).toBe(400);
+    await expect(
+      repository.updateMembershipRole(identity, {
+        membershipId: identity.membershipId,
+        role: "ReadOnlyViewer",
+        expectedVersion: 1,
+        idempotencyKey: `member-demote-owner-${randomUUID()}`,
+      }),
+    ).rejects.toThrow("membership role update conflict");
+
+    const revokeCandidate = await server.inject({
+      method: "POST",
+      url: "/v1/members/invitations",
+      headers: {
+        "idempotency-key": `member-invite-${randomUUID()}`,
+        "if-match": "4",
+      },
+      payload: { email: account.email, role: "Editor" },
+    });
+    expect(revokeCandidate.statusCode).toBe(201);
+    expect(revokeCandidate.json()).toMatchObject({ householdVersion: 5 });
+    const revokeCandidateId = revokeCandidate.json<{
+      invitation: { id: string };
+    }>().invitation.id;
+    const revokeKey = `member-revoke-${randomUUID()}`;
+    const revoked = await server.inject({
+      method: "POST",
+      url: `/v1/members/invitations/${revokeCandidateId}/revoke`,
+      headers: { "idempotency-key": revokeKey, "if-match": "1" },
+    });
+    expect(revoked.statusCode).toBe(200);
+    expect(revoked.json()).toEqual({
+      invitation: {
+        id: revokeCandidateId,
+        status: "revoked",
+        version: 2,
+      },
+      householdVersion: 6,
+    });
+    const revokeReplay = await server.inject({
+      method: "POST",
+      url: `/v1/members/invitations/${revokeCandidateId}/revoke`,
+      headers: { "idempotency-key": revokeKey, "if-match": "1" },
+    });
+    expect(revokeReplay.statusCode).toBe(200);
+    expect(revokeReplay.json()).toEqual(revoked.json());
+    const revokedAcceptanceContext =
+      await repository.getMembershipInvitationForAcceptance(account, {
+        tokenHash: createHash("sha256")
+          .update(observedInvitationToken)
+          .digest("hex"),
+        emailHash: createHmac("sha256", onboardingKek)
+          .update(`membership-invite-email:${account.email}`)
+          .digest("hex"),
+        now: new Date().toISOString(),
+      });
+    expect(revokedAcceptanceContext).toBeNull();
+
     const members = await server.inject({ method: "GET", url: "/v1/members" });
     expect(members.statusCode).toBe(200);
     expect(members.headers["cache-control"]).toBe("no-store");
@@ -666,7 +770,7 @@ describe("vault API persistence", () => {
         }),
         expect.objectContaining({
           displayName: "Invited Family Helper",
-          role: "FamilyHelper",
+          role: "ReadOnlyViewer",
         }),
       ]),
     });

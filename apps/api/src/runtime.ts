@@ -389,6 +389,13 @@ export function createApplicationRuntime(environment: Environment): {
           key.plaintextKey.fill(0);
         }
       },
+      revokeInvitation: (identity, input) =>
+        repository.revokeMembershipInvitation(identity, {
+          ...input,
+          revokedAt: new Date().toISOString(),
+        }),
+      updateMemberRole: (identity, input) =>
+        repository.updateMembershipRole(identity, input),
       authorizeIdentity: async (identity, scope) => {
         try {
           requireIdentityAuthorization(identity, scope);

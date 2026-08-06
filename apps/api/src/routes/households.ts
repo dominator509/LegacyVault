@@ -122,6 +122,13 @@ const invitationalRoles = [
   "EmergencyRecipient",
 ] as const satisfies readonly Role[];
 
+const idPathSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id"],
+  properties: { id: { type: "string", format: "uuid" } },
+} as const;
+
 export async function registerHouseholdRoutes(
   server: FastifyInstance,
   dependencies: {
@@ -159,6 +166,23 @@ export async function registerHouseholdRoutes(
         token: string;
         displayName: string;
         expectedInvitationVersion: number;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
+    revokeInvitation: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        invitationId: string;
+        expectedVersion: number;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
+    updateMemberRole: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        membershipId: string;
+        role: (typeof invitationalRoles)[number];
+        expectedVersion: number;
         idempotencyKey: string;
       },
     ) => Promise<unknown>;
@@ -509,6 +533,140 @@ export async function registerHouseholdRoutes(
           token,
           displayName: boundedName(body, "displayName", 160),
           expectedInvitationVersion: positiveVersion(request),
+          idempotencyKey: idempotencyKey(request),
+        }),
+      );
+    },
+  );
+
+  server.post(
+    "/v1/members/invitations/:id/revoke",
+    {
+      schema: {
+        tags: ["members"],
+        summary: "Revoke an unused household invitation",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: idPathSchema,
+        response: {
+          200: {
+            description: "Invitation revoked",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["invitation", "householdVersion"],
+                  properties: {
+                    invitation: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["id", "status", "version"],
+                      properties: {
+                        id: { type: "string", format: "uuid" },
+                        status: { type: "string", const: "revoked" },
+                        version: { type: "integer", minimum: 2 },
+                      },
+                    },
+                    householdVersion: { type: "integer", minimum: 2 },
+                  },
+                },
+              },
+            },
+          },
+          ...standardProblemResponses,
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "approve",
+          purpose: "vault.member.invitation.revoke",
+        });
+      const { id } = request.params as { id: string };
+      return reply.send(
+        await dependencies.revokeInvitation(identity, {
+          invitationId: id,
+          expectedVersion: positiveVersion(request),
+          idempotencyKey: idempotencyKey(request),
+        }),
+      );
+    },
+  );
+
+  server.post(
+    "/v1/members/:id/role",
+    {
+      schema: {
+        tags: ["members"],
+        summary: "Change a non-owner household member role",
+        security: [{ sessionCookie: [] }],
+        headers: optimisticWriteHeaderSchema,
+        params: idPathSchema,
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["role"],
+          properties: { role: { type: "string", enum: invitationalRoles } },
+        },
+        response: {
+          200: {
+            description: "Member role changed",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["membership", "householdVersion"],
+                  properties: {
+                    membership: {
+                      type: "object",
+                      additionalProperties: false,
+                      required: ["id", "role", "version"],
+                      properties: {
+                        id: { type: "string", format: "uuid" },
+                        role: { type: "string", enum: invitationalRoles },
+                        version: { type: "integer", minimum: 2 },
+                      },
+                    },
+                    householdVersion: { type: "integer", minimum: 2 },
+                  },
+                },
+              },
+            },
+          },
+          ...standardProblemResponses,
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "approve",
+          purpose: "vault.member.role.update",
+        });
+      const body = bodyObject(request.body);
+      const role = body.role;
+      if (
+        typeof role !== "string" ||
+        !invitationalRoles.includes(role as (typeof invitationalRoles)[number])
+      )
+        throw new HouseholdApiProblem(
+          400,
+          "Invalid request",
+          "role is not assignable",
+        );
+      const { id } = request.params as { id: string };
+      return reply.send(
+        await dependencies.updateMemberRole(identity, {
+          membershipId: id,
+          role: role as (typeof invitationalRoles)[number],
+          expectedVersion: positiveVersion(request),
           idempotencyKey: idempotencyKey(request),
         }),
       );

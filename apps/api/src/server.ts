@@ -76,6 +76,29 @@ export interface ServerDependencies {
       idempotencyKey: string;
     },
   ) => Promise<unknown>;
+  revokeInvitation?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      invitationId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
+  updateMemberRole?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      membershipId: string;
+      role:
+        | "CoOwner"
+        | "Editor"
+        | "FamilyHelper"
+        | "ProfessionalAdvisor"
+        | "ReadOnlyViewer"
+        | "EmergencyRecipient";
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
   startPortableExport?: (
     identity: AuthenticatedTenantIdentity,
     input: { idempotencyKey: string; exportKey: Uint8Array },
@@ -309,7 +332,9 @@ export function buildServer(dependencies?: ServerDependencies) {
     dependencies.listHouseholds &&
     dependencies.listMembers &&
     dependencies.createInvitation &&
-    dependencies.acceptInvitation
+    dependencies.acceptInvitation &&
+    dependencies.revokeInvitation &&
+    dependencies.updateMemberRole
   )
     server.register(async (instance) =>
       registerHouseholdRoutes(instance, {
@@ -323,6 +348,8 @@ export function buildServer(dependencies?: ServerDependencies) {
         listMembers: dependencies.listMembers!,
         createInvitation: dependencies.createInvitation!,
         acceptInvitation: dependencies.acceptInvitation!,
+        revokeInvitation: dependencies.revokeInvitation!,
+        updateMemberRole: dependencies.updateMemberRole!,
       }),
     );
   if (dependencies?.stripe)

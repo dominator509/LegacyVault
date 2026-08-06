@@ -9,6 +9,20 @@ import {
 } from "@legacy/domain";
 import { createDatabasePool } from "./client.js";
 
+const assignableHouseholdRoles = new Set<Role>([
+  "CoOwner",
+  "Editor",
+  "FamilyHelper",
+  "ProfessionalAdvisor",
+  "ReadOnlyViewer",
+  "EmergencyRecipient",
+]);
+
+function requireAssignableHouseholdRole(role: Role): void {
+  if (!assignableHouseholdRoles.has(role))
+    throw new Error("membership role is not assignable");
+}
+
 export interface TenantContext {
   organizationId: string;
   householdId: string;
@@ -501,6 +515,7 @@ export class VaultRepository {
     invitation: { id: string; role: Role; expiresAt: string; version: number };
     householdVersion: number;
   }> {
+    requireAssignableHouseholdRole(input.role);
     return this.withTenant(context, async (client) => {
       const requestShape = {
         emailHash: input.emailHash,
@@ -648,6 +663,167 @@ export class VaultRepository {
         version: row.version,
         expiresAt: row.expires_at.toISOString(),
       };
+    });
+  }
+
+  async revokeMembershipInvitation(
+    context: TenantContext,
+    input: {
+      invitationId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+      revokedAt: string;
+    },
+  ): Promise<{
+    invitation: { id: string; status: "revoked"; version: number };
+    householdVersion: number;
+  }> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            invitationId: input.invitationId,
+            expectedVersion: input.expectedVersion,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const replay = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = replay.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("invitation revocation idempotency conflict");
+        if (!row.response_body)
+          throw new Error("invitation revocation is still processing");
+        return row.response_body as {
+          invitation: { id: string; status: "revoked"; version: number };
+          householdVersion: number;
+        };
+      }
+      const invitation = await client.query<{
+        id: string;
+        status: "revoked";
+        version: number;
+      }>(
+        "update membership_invitations set revoked_at=$1,version=version+1 where id=$2 and version=$3 and accepted_at is null and revoked_at is null returning id,'revoked'::text as status,version",
+        [input.revokedAt, input.invitationId, input.expectedVersion],
+      );
+      const invitationRow = invitation.rows[0];
+      if (!invitationRow)
+        throw new Error("membership invitation revocation conflict");
+      const household = await client.query<{ version: number }>(
+        "update households set version=version+1 where id=$1 returning version",
+        [context.householdId],
+      );
+      const householdVersion = household.rows[0]?.version;
+      if (!householdVersion)
+        throw new Error("membership invitation household update failed");
+      const response = { invitation: invitationRow, householdVersion };
+      await client.query(
+        "update idempotency_records set status_code=200,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
+    });
+  }
+
+  async updateMembershipRole(
+    context: TenantContext,
+    input: {
+      membershipId: string;
+      role: Role;
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ): Promise<{
+    membership: { id: string; role: Role; version: number };
+    householdVersion: number;
+  }> {
+    requireAssignableHouseholdRole(input.role);
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            membershipId: input.membershipId,
+            role: input.role,
+            expectedVersion: input.expectedVersion,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const replay = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = replay.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("membership role idempotency conflict");
+        if (!row.response_body)
+          throw new Error("membership role update is still processing");
+        return row.response_body as {
+          membership: { id: string; role: Role; version: number };
+          householdVersion: number;
+        };
+      }
+      const membership = await client.query<{
+        id: string;
+        role: Role;
+        version: number;
+      }>(
+        "update memberships set role=$1,version=version+1 where id=$2 and version=$3 and active=1 and role<>'Owner' returning id,role,version",
+        [input.role, input.membershipId, input.expectedVersion],
+      );
+      const membershipRow = membership.rows[0];
+      if (!membershipRow) throw new Error("membership role update conflict");
+      const household = await client.query<{ version: number }>(
+        "update households set version=version+1 where id=$1 returning version",
+        [context.householdId],
+      );
+      const householdVersion = household.rows[0]?.version;
+      if (!householdVersion)
+        throw new Error("membership household update failed");
+      const response = { membership: membershipRow, householdVersion };
+      await client.query(
+        "update idempotency_records set status_code=200,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
     });
   }
 
