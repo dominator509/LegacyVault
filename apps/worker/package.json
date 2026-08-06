@@ -11,6 +11,7 @@
     "start": "tsx --env-file-if-exists=../../.env src/index.ts"
   },
   "dependencies": {
+    "@legacy/ai-gateway": "workspace:*",
     "@legacy/contracts": "workspace:*",
     "@legacy/crypto": "workspace:*",
     "@legacy/database": "workspace:*",

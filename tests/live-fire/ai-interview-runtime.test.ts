@@ -108,8 +108,10 @@ describe("consent-bound AI interview live fire", () => {
       try {
         await redis.connect();
         const keys = await redis.keys(`${namespace}:*`);
-        expect(keys).toHaveLength(1);
-        const cachedCiphertext = await redis.get(keys[0] ?? "");
+        const valueKeys = keys.filter((key) => !key.includes(":scope:"));
+        expect(valueKeys).toHaveLength(1);
+        expect(keys.filter((key) => key.includes(":scope:"))).toHaveLength(1);
+        const cachedCiphertext = await redis.get(valueKeys[0] ?? "");
         expect(cachedCiphertext).toContain('"algorithm":"A256GCM"');
         expect(cachedCiphertext).not.toContain("Example Mutual");
         expect(cachedCiphertext).not.toContain("proposedValue");

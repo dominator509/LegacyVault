@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createPrivacyDeletionWorkflowHandler } from "../../apps/worker/src/index.js";
+import { aiCacheScopeKey } from "../../packages/ai-gateway/src/index.js";
 import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { runMigrations } from "../../packages/database/src/migrate.js";
 import { VaultRepository } from "../../packages/database/src/repository.js";
@@ -93,6 +94,7 @@ describe("verifiable privacy deletion", () => {
     const seeded = await seedDeletionTenant();
     const handler = createPrivacyDeletionWorkflowHandler({
       repository,
+      purgeAiCache: async () => undefined,
       backupRetentionDays: 35,
       now: () => new Date("2026-01-15T00:00:00.000Z"),
     });
@@ -111,8 +113,12 @@ describe("verifiable privacy deletion", () => {
 
   it("removes attributable account access after recovery and retains only explicit evidence pending review", async () => {
     const seeded = await seedDeletionTenant();
+    const purgedScopes: string[] = [];
     const handler = createPrivacyDeletionWorkflowHandler({
       repository,
+      purgeAiCache: async (scopeKey) => {
+        purgedScopes.push(scopeKey);
+      },
       backupRetentionDays: 35,
       now: () => new Date("2026-02-01T00:00:00.000Z"),
     });
@@ -120,6 +126,12 @@ describe("verifiable privacy deletion", () => {
       workflowId: seeded.confirmed.workflow.id,
       ...seeded.context,
     });
+    expect(purgedScopes).toEqual([
+      aiCacheScopeKey(
+        seeded.context.organizationId,
+        seeded.context.householdId,
+      ),
+    ]);
 
     const client = createDatabaseClient(databaseUrl);
     await client.connect();
@@ -188,6 +200,29 @@ describe("verifiable privacy deletion", () => {
     }
   });
 
+  it("fails closed before destructive state when AI cache purge fails", async () => {
+    const seeded = await seedDeletionTenant();
+    const handler = createPrivacyDeletionWorkflowHandler({
+      repository,
+      purgeAiCache: async () => {
+        throw new Error("cache purge unavailable");
+      },
+      backupRetentionDays: 35,
+      now: () => new Date("2026-02-01T00:00:00.000Z"),
+    });
+    await expect(
+      handler({
+        workflowId: seeded.confirmed.workflow.id,
+        ...seeded.context,
+      }),
+    ).rejects.toThrow("cache purge unavailable");
+    const deletion = await repository.getPrivacyDeletionInput(
+      seeded.context,
+      seeded.confirmed.workflow.id,
+    );
+    expect(deletion.status).toBe("recovery-period");
+  });
+
   it("blocks destructive work when an applicable legal hold is active", async () => {
     const seeded = await seedDeletionTenant();
     const client = createDatabaseClient(databaseUrl);
@@ -213,6 +248,7 @@ describe("verifiable privacy deletion", () => {
     }
     const handler = createPrivacyDeletionWorkflowHandler({
       repository,
+      purgeAiCache: async () => undefined,
       backupRetentionDays: 35,
       now: () => new Date("2026-02-01T00:00:00.000Z"),
     });

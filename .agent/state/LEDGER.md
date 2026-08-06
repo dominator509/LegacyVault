@@ -203,3 +203,8 @@
 2026-08-06T01:50:05Z | codex | EP-004 | SIG | full_cache_gate_format_exit_1_gateway_and_security_script_style_only_lint_unit_38_integration_49_e2e_2_build_security_audit_smoke_live_fire_2_ok
 2026-08-06T01:50:05Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_security_gates
 2026-08-06T01:50:05Z | codex | EP-004 | HEARTBEAT | Redis_TLS_production_enforcement_household_DEK_encrypted_AI_exact_cache_tenant_consent_prompt_model_mode_budget_isolation_corrupt_evict_content_free_hit_miss_metrics_cross_runtime_authenticated_DeepSeek_replay_unit_38_integration_49_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
+2026-08-06T01:58:41Z | codex | EP-004 | SIG | cache_scope_purge_gate_format_exit_1_runtime_style_only_frozen_install_audit_type_integration_50_security_ok
+2026-08-06T01:58:41Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_integration_security_and_live_fire
+2026-08-06T01:58:41Z | codex | EP-004 | SIG | cache_live_fire_expected_one_Redis_key_but_scope_index_intentionally_added_second_key_while_format_type_integration_50_security_ok
+2026-08-06T01:58:41Z | codex | EP-004 | HYPOTHESIS | distinguish_one_encrypted_value_key_from_one_hashed_scope_index_and_preserve_both_assertions
+2026-08-06T01:58:41Z | codex | EP-004 | HEARTBEAT | hashed_tenant_scope_index_fail_closed_AI_cache_purge_before_destructive_privacy_state_TTL_fallback_real_Redis_and_authenticated_cross_runtime_cache_proof_unit_38_integration_50_e2e_2_live_fire_2_build_format_security_audit_smoke_ok

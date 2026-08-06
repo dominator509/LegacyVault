@@ -17,6 +17,8 @@ import {
 import { VaultRepository } from "@legacy/database/repository";
 import {
   AiPolicyGateway,
+  aiCacheScopeKey,
+  aiExactCacheNamespace,
   createDeepSeekRuntime,
   RedisExactCache,
   scanDlp,
@@ -189,10 +191,10 @@ export function createApplicationRuntime(environment: Environment): {
   });
   const aiExactCache = new RedisExactCache(
     environment.REDIS_URL,
-    `legacy:ai-exact:${createHash("sha256")
-      .update(`${environment.NODE_ENV}:${environment.WORKFLOW_QUEUE_NAME}`)
-      .digest("hex")
-      .slice(0, 16)}`,
+    aiExactCacheNamespace(
+      environment.NODE_ENV,
+      environment.WORKFLOW_QUEUE_NAME,
+    ),
     environment.NODE_ENV === "production",
   );
   const aiIdempotencyCache = new Map<
@@ -724,6 +726,7 @@ export function createApplicationRuntime(environment: Environment): {
                 }),
               ),
               900,
+              aiCacheScopeKey(identity.organizationId, identity.householdId),
             );
           } finally {
             serialized.fill(0);

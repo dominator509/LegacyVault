@@ -40,6 +40,11 @@ import {
   recordCategoryFromFieldKey,
   type CandidateFact,
 } from "@legacy/domain";
+import {
+  aiCacheScopeKey,
+  aiExactCacheNamespace,
+  RedisExactCache,
+} from "@legacy/ai-gateway";
 
 export type WorkflowJobName =
   | "document-process"
@@ -285,6 +290,7 @@ export function createPortableExportWorkflowHandler(input: {
 
 export function createPrivacyDeletionWorkflowHandler(input: {
   repository: PrivacyDeletionRepository;
+  purgeAiCache: (scopeKey: string) => Promise<void>;
   backupRetentionDays: number;
   now?: () => Date;
 }): WorkflowHandler {
@@ -312,6 +318,9 @@ export function createPrivacyDeletionWorkflowHandler(input: {
     const now = input.now?.() ?? new Date();
     if (now.getTime() < Date.parse(deletion.recoveryUntil))
       throw new Error("privacy deletion recovery period has not elapsed");
+    await input.purgeAiCache(
+      aiCacheScopeKey(context.organizationId, context.householdId),
+    );
     await input.repository.completePrivacyDeletionActiveSystem(context, {
       executionId: deletion.executionId,
       expectedVersion: deletion.version,
@@ -897,8 +906,17 @@ async function main(): Promise<void> {
     objectStore,
     ocr,
   });
+  const aiExactCache = new RedisExactCache(
+    environment.REDIS_URL,
+    aiExactCacheNamespace(
+      environment.NODE_ENV,
+      environment.WORKFLOW_QUEUE_NAME,
+    ),
+    environment.NODE_ENV === "production",
+  );
   const privacyDelete = createPrivacyDeletionWorkflowHandler({
     repository,
+    purgeAiCache: (scopeKey) => aiExactCache.purgeScope(scopeKey),
     backupRetentionDays: environment.BACKUP_RETENTION_DAYS ?? 35,
   });
   const reportGenerate = createReportGenerationWorkflowHandler({
@@ -927,7 +945,11 @@ async function main(): Promise<void> {
   );
   const shutdown = async () => {
     await worker.close();
-    await Promise.all([repository.close(), householdKeyStore.close()]);
+    await Promise.all([
+      repository.close(),
+      householdKeyStore.close(),
+      aiExactCache.close(),
+    ]);
     applicationKek.fill(0);
   };
   process.once("SIGINT", () => void shutdown());

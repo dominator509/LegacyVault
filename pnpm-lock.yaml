@@ -106,6 +106,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@legacy/ai-gateway':
+        specifier: workspace:*
+        version: link:../../packages/ai-gateway
       '@legacy/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
