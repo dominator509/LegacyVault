@@ -451,3 +451,9 @@
 2026-08-06T13:54:04Z | codex | EP-009 | HYPOTHESIS | use_the_authorized_repository_root_working_directory_for_release_artifact_tests
 2026-08-06T13:55:33Z | codex | EP-009 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
 2026-08-06T13:55:33Z | codex | EP-009 | HEARTBEAT | four_digest_pinned_image_targets_signed_staging_workflow_real_release_rehearsal_and_idempotent_migration_restore_rehearsal_implemented
+2026-08-06T14:13:08Z | codex | EP-009 | SIG | DeepSeek_exact_cache_live_fire_p95_407.50ms_exceeded_400ms_exit_1
+2026-08-06T14:13:08Z | codex | EP-009 | HYPOTHESIS | avoid_serializing_existing_household_key_reads_behind_the_creation_only_advisory_lock
+2026-08-06T14:20:55Z | codex | EP-009 | SIG | final_exact_verify_exit_1_missing_STRIPE_SECRET_KEY_EXT005
+2026-08-06T14:20:55Z | codex | EP-009 | EXTERNAL_DEFERRED | M2_verify_green_tag_GHCR_signing_and_named_Fly_staging_release_remain_external
+2026-08-06T14:20:55Z | codex | EP-009 | CONTINUATION_PASS | unit_58_integration_72_e2e_6_contract_39_operations_1727_cases_build_security_audit_smoke_migration_restore_and_four_local_OCI_targets_ok
+2026-08-06T14:20:55Z | codex | EP-009 | HEARTBEAT | targeted_key_store_concurrency_fix_removed_creation_lock_from_read_path_DeepSeek_live_fire_and_k6_50VUs_250_iterations_p95_264.20ms_ok

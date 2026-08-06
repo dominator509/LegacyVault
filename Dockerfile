@@ -7,11 +7,12 @@ ENV CI=true
 WORKDIR /app
 RUN npm install --global pnpm@10.13.1
 COPY .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.build.json ./
+RUN pnpm fetch --frozen-lockfile
 COPY apps ./apps
 COPY packages ./packages
 COPY drizzle ./drizzle
 COPY scripts ./scripts
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --offline --frozen-lockfile
 RUN pnpm build
 
 FROM workspace AS runtime

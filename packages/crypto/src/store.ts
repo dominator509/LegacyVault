@@ -63,11 +63,7 @@ export class PostgresHouseholdKeyStore {
         "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
         [context.organizationId, context.householdId],
       );
-      await client.query(
-        "select pg_advisory_xact_lock(hashtextextended($1,0))",
-        [`household-key:${context.householdId}`],
-      );
-      const existing = await client.query<{
+      let existing = await client.query<{
         key_version: number;
         wrapped_key: unknown;
       }>(
@@ -83,6 +79,27 @@ export class PostgresHouseholdKeyStore {
         );
         await client.query("commit");
         return { keyVersion: row.key_version, plaintextKey };
+      }
+      await client.query(
+        "select pg_advisory_xact_lock(hashtextextended($1,0))",
+        [`household-key:${context.householdId}`],
+      );
+      existing = await client.query<{
+        key_version: number;
+        wrapped_key: unknown;
+      }>(
+        "select key_version,wrapped_key from household_keys where status='active' order by key_version desc limit 1",
+      );
+      const afterLock = existing.rows[0];
+      if (afterLock) {
+        const plaintextKey = unwrapHouseholdKey(
+          wrappedHouseholdKey(afterLock.wrapped_key),
+          this.keyEncryptionKey,
+          context.organizationId,
+          context.householdId,
+        );
+        await client.query("commit");
+        return { keyVersion: afterLock.key_version, plaintextKey };
       }
       const keyVersion = 1;
       const generated = createWrappedHouseholdKey({
