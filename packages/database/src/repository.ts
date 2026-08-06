@@ -1,12 +1,40 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
-import type { ReportKind } from "@legacy/domain";
+import type { ReportKind, Role } from "@legacy/domain";
 import { createDatabasePool } from "./client.js";
 
 export interface TenantContext {
   organizationId: string;
   householdId: string;
   actorId: string;
+}
+export interface AccountContext {
+  authUserId: string;
+}
+export interface HouseholdMembershipSummary {
+  id: string;
+  organizationId: string;
+  name: string;
+  version: number;
+  membershipId: string;
+  role: Role;
+}
+export interface EncryptedHouseholdMember {
+  id: string;
+  personId: string;
+  role: Role;
+  active: boolean;
+  version: number;
+  displayNameCiphertext: Uint8Array;
+  keyVersion: number;
+}
+export interface MembershipInvitationAcceptanceContext {
+  id: string;
+  organizationId: string;
+  householdId: string;
+  role: Role;
+  version: number;
+  expiresAt: string;
 }
 export interface CandidateFactWrite {
   id: string;
@@ -234,6 +262,522 @@ export class VaultRepository {
     } finally {
       client.release();
     }
+  }
+
+  async withAccount<T>(
+    context: AccountContext,
+    operation: (client: pg.PoolClient) => Promise<T>,
+  ): Promise<T> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("select set_config('app.auth_user_id', $1, true)", [
+        context.authUserId,
+      ]);
+      const result = await operation(client);
+      await client.query("commit");
+      return result;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async createHouseholdForAccount(
+    context: AccountContext,
+    input: {
+      idempotencyKey: string;
+      expectedVersion: 0;
+      organizationId: string;
+      organizationName: string;
+      householdId: string;
+      householdName: string;
+      personId: string;
+      membershipId: string;
+      displayNameCiphertext: Uint8Array;
+      keyVersion: number;
+      householdKeyId: string;
+      wrappedHouseholdKey: unknown;
+    },
+  ): Promise<{
+    household: { id: string; name: string; version: number };
+    membership: { id: string; role: "Owner"; version: number };
+  }> {
+    return this.withAccount(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            organizationName: input.organizationName,
+            householdName: input.householdName,
+            expectedVersion: input.expectedVersion,
+          }),
+        )
+        .digest("hex");
+      const inserted = await client.query(
+        "insert into account_idempotency_records(auth_user_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,now()+interval '24 hours') on conflict do nothing",
+        [context.authUserId, input.idempotencyKey, requestHash],
+      );
+      if (inserted.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from account_idempotency_records where auth_user_id=$1 and idempotency_key=$2",
+          [context.authUserId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("account idempotency key conflict");
+        if (!row.response_body)
+          throw new Error("household creation is still processing");
+        return row.response_body as {
+          household: { id: string; name: string; version: number };
+          membership: { id: string; role: "Owner"; version: number };
+        };
+      }
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [input.organizationId, input.householdId],
+      );
+      await client.query("insert into organizations(id,name) values ($1,$2)", [
+        input.organizationId,
+        input.organizationName,
+      ]);
+      const household = await client.query<{
+        id: string;
+        name: string;
+        version: number;
+      }>(
+        "insert into households(id,organization_id,name) values ($1,$2,$3) returning id,name,version",
+        [input.householdId, input.organizationId, input.householdName],
+      );
+      await client.query(
+        "insert into household_keys(id,organization_id,household_id,key_version,wrapped_key,status,created_at) values ($1,$2,$3,$4,$5,'active',now())",
+        [
+          input.householdKeyId,
+          input.organizationId,
+          input.householdId,
+          input.keyVersion,
+          JSON.stringify(input.wrappedHouseholdKey),
+        ],
+      );
+      await client.query(
+        "insert into people(id,organization_id,household_id,display_name_encrypted,key_version) values ($1,$2,$3,$4,$5)",
+        [
+          input.personId,
+          input.organizationId,
+          input.householdId,
+          Buffer.from(input.displayNameCiphertext),
+          input.keyVersion,
+        ],
+      );
+      const membership = await client.query<{
+        id: string;
+        role: "Owner";
+        version: number;
+      }>(
+        "insert into memberships(id,organization_id,household_id,person_id,role,auth_user_id) values ($1,$2,$3,$4,'Owner',$5) returning id,role,version",
+        [
+          input.membershipId,
+          input.organizationId,
+          input.householdId,
+          input.personId,
+          context.authUserId,
+        ],
+      );
+      const householdRow = household.rows[0];
+      const membershipRow = membership.rows[0];
+      if (!householdRow || !membershipRow)
+        throw new Error("household creation returned no row");
+      const response = {
+        household: householdRow,
+        membership: membershipRow,
+      };
+      await client.query(
+        "update account_idempotency_records set response_body=$1 where auth_user_id=$2 and idempotency_key=$3",
+        [JSON.stringify(response), context.authUserId, input.idempotencyKey],
+      );
+      return response;
+    });
+  }
+
+  async listHouseholdsForAccount(
+    context: AccountContext,
+  ): Promise<HouseholdMembershipSummary[]> {
+    return this.withAccount(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        organization_id: string;
+        name: string;
+        version: number;
+        membership_id: string;
+        role: Role;
+      }>(
+        "select h.id,h.organization_id,h.name,h.version,m.id as membership_id,m.role from memberships m join households h on h.id=m.household_id and h.organization_id=m.organization_id where m.auth_user_id=$1 and m.active=1 order by h.name,h.id",
+        [context.authUserId],
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        organizationId: row.organization_id,
+        name: row.name,
+        version: row.version,
+        membershipId: row.membership_id,
+        role: row.role,
+      }));
+    });
+  }
+
+  async listHouseholdMembers(
+    context: TenantContext,
+  ): Promise<EncryptedHouseholdMember[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        person_id: string;
+        role: Role;
+        active: number;
+        version: number;
+        display_name_encrypted: Buffer;
+        key_version: number;
+      }>(
+        "select m.id,m.person_id,m.role,m.active,m.version,p.display_name_encrypted,p.key_version from memberships m join people p on p.id=m.person_id order by m.id",
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        personId: row.person_id,
+        role: row.role,
+        active: row.active === 1,
+        version: row.version,
+        displayNameCiphertext: row.display_name_encrypted,
+        keyVersion: row.key_version,
+      }));
+    });
+  }
+
+  async createMembershipInvitation(
+    context: TenantContext,
+    input: {
+      idempotencyKey: string;
+      expectedHouseholdVersion: number;
+      invitationId: string;
+      emailHash: string;
+      tokenHash: string;
+      role: Role;
+      invitedBy: string;
+      expiresAt: string;
+    },
+  ): Promise<{
+    invitation: { id: string; role: Role; expiresAt: string; version: number };
+    householdVersion: number;
+  }> {
+    return this.withTenant(context, async (client) => {
+      const requestShape = {
+        emailHash: input.emailHash,
+        role: input.role,
+        expectedHouseholdVersion: input.expectedHouseholdVersion,
+      };
+      const requestHash = createHash("sha256")
+        .update(JSON.stringify(requestShape))
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("membership invitation idempotency conflict");
+        if (!row.response_body)
+          throw new Error("membership invitation is still processing");
+        return row.response_body as {
+          invitation: {
+            id: string;
+            role: Role;
+            expiresAt: string;
+            version: number;
+          };
+          householdVersion: number;
+        };
+      }
+      const household = await client.query<{ version: number }>(
+        "update households set version=version+1 where id=$1 and version=$2 returning version",
+        [context.householdId, input.expectedHouseholdVersion],
+      );
+      const householdVersion = household.rows[0]?.version;
+      if (!householdVersion)
+        throw new Error("membership invitation version conflict");
+      let invitation;
+      try {
+        invitation = await client.query<{
+          id: string;
+          role: Role;
+          expires_at: Date;
+          version: number;
+        }>(
+          "insert into membership_invitations(id,organization_id,household_id,email_hash,token_hash,role,invited_by,expires_at) values ($1,$2,$3,$4,$5,$6,$7,$8) returning id,role,expires_at,version",
+          [
+            input.invitationId,
+            context.organizationId,
+            context.householdId,
+            input.emailHash,
+            input.tokenHash,
+            input.role,
+            input.invitedBy,
+            input.expiresAt,
+          ],
+        );
+      } catch (error) {
+        if (
+          typeof error === "object" &&
+          error !== null &&
+          "code" in error &&
+          error.code === "23505"
+        )
+          throw new Error("membership invitation conflict");
+        throw error;
+      }
+      const row = invitation.rows[0];
+      if (!row) throw new Error("membership invitation returned no row");
+      const response = {
+        invitation: {
+          id: row.id,
+          role: row.role,
+          expiresAt: row.expires_at.toISOString(),
+          version: row.version,
+        },
+        householdVersion,
+      };
+      await client.query(
+        "update idempotency_records set status_code=201,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
+    });
+  }
+
+  async getMembershipInvitationForAcceptance(
+    context: AccountContext,
+    input: { tokenHash: string; emailHash: string; now: string },
+  ): Promise<MembershipInvitationAcceptanceContext | null> {
+    return this.withAccount(context, async (client) => {
+      await client.query(
+        "select set_config('app.invitation_token_hash',$1,true)",
+        [input.tokenHash],
+      );
+      const result = await client.query<{
+        id: string;
+        organization_id: string;
+        household_id: string;
+        email_hash: string;
+        role: Role;
+        version: number;
+        expires_at: Date;
+        accepted_at: Date | null;
+        accepted_by_auth_user_id: string | null;
+        revoked_at: Date | null;
+      }>(
+        "select id,organization_id,household_id,email_hash,role,version,expires_at,accepted_at,accepted_by_auth_user_id,revoked_at from membership_invitations where token_hash=$1",
+        [input.tokenHash],
+      );
+      const row = result.rows[0];
+      const acceptedByThisAccount =
+        row?.accepted_at !== null &&
+        row?.accepted_by_auth_user_id === context.authUserId;
+      if (
+        !row ||
+        row.email_hash !== input.emailHash ||
+        row.revoked_at ||
+        (!acceptedByThisAccount &&
+          (row.accepted_at ||
+            row.expires_at.getTime() <= Date.parse(input.now)))
+      )
+        return null;
+      return {
+        id: row.id,
+        organizationId: row.organization_id,
+        householdId: row.household_id,
+        role: row.role,
+        version: row.version,
+        expiresAt: row.expires_at.toISOString(),
+      };
+    });
+  }
+
+  async acceptMembershipInvitation(
+    context: AccountContext,
+    input: {
+      idempotencyKey: string;
+      tokenHash: string;
+      emailHash: string;
+      displayNameHash: string;
+      expectedInvitationVersion: number;
+      personId: string;
+      membershipId: string;
+      displayNameCiphertext: Uint8Array;
+      keyVersion: number;
+      acceptedAt: string;
+    },
+  ): Promise<{
+    household: { id: string; name: string; version: number };
+    membership: { id: string; role: Role; version: number };
+  }> {
+    return this.withAccount(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            tokenHash: input.tokenHash,
+            emailHash: input.emailHash,
+            displayNameHash: input.displayNameHash,
+            expectedInvitationVersion: input.expectedInvitationVersion,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into account_idempotency_records(auth_user_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,now()+interval '24 hours') on conflict do nothing",
+        [context.authUserId, input.idempotencyKey, requestHash],
+      );
+      if (reserved.rowCount === 0) {
+        const existing = await client.query<{
+          request_hash: string;
+          response_body: unknown;
+        }>(
+          "select request_hash,response_body from account_idempotency_records where auth_user_id=$1 and idempotency_key=$2",
+          [context.authUserId, input.idempotencyKey],
+        );
+        const row = existing.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("invitation acceptance idempotency conflict");
+        if (!row.response_body)
+          throw new Error("invitation acceptance is still processing");
+        return row.response_body as {
+          household: { id: string; name: string; version: number };
+          membership: { id: string; role: Role; version: number };
+        };
+      }
+      await client.query(
+        "select set_config('app.invitation_token_hash',$1,true)",
+        [input.tokenHash],
+      );
+      type InvitationAcceptanceRow = {
+        id: string;
+        organization_id: string;
+        household_id: string;
+        email_hash: string;
+        role: Role;
+        version: number;
+        expires_at: Date;
+        accepted_at: Date | null;
+        revoked_at: Date | null;
+      };
+      const visibleInvitation = await client.query<InvitationAcceptanceRow>(
+        "select id,organization_id,household_id,email_hash,role,version,expires_at,accepted_at,revoked_at from membership_invitations where token_hash=$1",
+        [input.tokenHash],
+      );
+      const visibleRow = visibleInvitation.rows[0];
+      if (
+        !visibleRow ||
+        visibleRow.email_hash !== input.emailHash ||
+        visibleRow.accepted_at ||
+        visibleRow.revoked_at ||
+        visibleRow.expires_at.getTime() <= Date.parse(input.acceptedAt)
+      )
+        throw new Error("membership invitation unavailable");
+      await client.query(
+        "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
+        [visibleRow.organization_id, visibleRow.household_id],
+      );
+      const lockedInvitation = await client.query<InvitationAcceptanceRow>(
+        "select id,organization_id,household_id,email_hash,role,version,expires_at,accepted_at,revoked_at from membership_invitations where id=$1 for update",
+        [visibleRow.id],
+      );
+      const invitationRow = lockedInvitation.rows[0];
+      if (
+        !invitationRow ||
+        invitationRow.email_hash !== input.emailHash ||
+        invitationRow.accepted_at ||
+        invitationRow.revoked_at ||
+        invitationRow.expires_at.getTime() <= Date.parse(input.acceptedAt)
+      )
+        throw new Error("membership invitation unavailable");
+      if (invitationRow.version !== input.expectedInvitationVersion)
+        throw new Error("membership invitation version conflict");
+      await client.query(
+        "insert into people(id,organization_id,household_id,display_name_encrypted,key_version) values ($1,$2,$3,$4,$5)",
+        [
+          input.personId,
+          invitationRow.organization_id,
+          invitationRow.household_id,
+          Buffer.from(input.displayNameCiphertext),
+          input.keyVersion,
+        ],
+      );
+      const membership = await client.query<{
+        id: string;
+        role: Role;
+        version: number;
+      }>(
+        "insert into memberships(id,organization_id,household_id,person_id,role,auth_user_id) values ($1,$2,$3,$4,$5,$6) returning id,role,version",
+        [
+          input.membershipId,
+          invitationRow.organization_id,
+          invitationRow.household_id,
+          input.personId,
+          invitationRow.role,
+          context.authUserId,
+        ],
+      );
+      const accepted = await client.query(
+        "update membership_invitations set accepted_at=$1,accepted_by_auth_user_id=$2,version=version+1 where id=$3 and version=$4 and accepted_at is null and revoked_at is null",
+        [
+          input.acceptedAt,
+          context.authUserId,
+          invitationRow.id,
+          input.expectedInvitationVersion,
+        ],
+      );
+      if (accepted.rowCount !== 1)
+        throw new Error("membership invitation version conflict");
+      const household = await client.query<{
+        id: string;
+        name: string;
+        version: number;
+      }>(
+        "update households set version=version+1 where id=$1 returning id,name,version",
+        [invitationRow.household_id],
+      );
+      const householdRow = household.rows[0];
+      const membershipRow = membership.rows[0];
+      if (!householdRow || !membershipRow)
+        throw new Error("membership acceptance returned no row");
+      const response = {
+        household: householdRow,
+        membership: membershipRow,
+      };
+      await client.query(
+        "update account_idempotency_records set response_body=$1 where auth_user_id=$2 and idempotency_key=$3",
+        [JSON.stringify(response), context.authUserId, input.idempotencyKey],
+      );
+      return response;
+    });
   }
 
   async createCandidateFact(

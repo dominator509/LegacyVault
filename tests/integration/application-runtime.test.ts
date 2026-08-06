@@ -103,6 +103,72 @@ describe("composed application runtime", () => {
     expect(text).toContain("This link expires in 30 minutes.");
   }, 20_000);
 
+  it("persists a token-hashed household invitation and delivers only its bounded acceptance link through local SMTP", async () => {
+    const organizationId = randomUUID();
+    const householdId = randomUUID();
+    const identity = {
+      organizationId,
+      householdId,
+      actorId: randomUUID(),
+      membershipId: randomUUID(),
+      role: "Owner" as const,
+      grants: [],
+      supportApprovals: [],
+      emergencyReleaseCategories: [],
+      sessionIssuedAt: new Date().toISOString(),
+      mfaVerifiedAt: new Date().toISOString(),
+    };
+    const client = createDatabaseClient(environment.DATABASE_URL ?? "");
+    await client.connect();
+    try {
+      await client.query("begin");
+      await client.query("select set_config('app.organization_id',$1,true)", [
+        organizationId,
+      ]);
+      await client.query("insert into organizations(id,name) values ($1,$2)", [
+        organizationId,
+        "Invitation Runtime Organization",
+      ]);
+      await client.query("select set_config('app.household_id',$1,true)", [
+        householdId,
+      ]);
+      await client.query(
+        "insert into households(id,organization_id,name) values ($1,$2,$3)",
+        [householdId, organizationId, "Invitation Runtime Household"],
+      );
+      await client.query("commit");
+    } finally {
+      await client.end();
+    }
+
+    const email = `invite-${randomUUID()}@example.test`;
+    const invitation = await runtime.dependencies.createInvitation?.(identity, {
+      email,
+      role: "FamilyHelper",
+      expectedHouseholdVersion: 1,
+      idempotencyKey: `runtime-member-invite-${randomUUID()}`,
+    });
+    expect(invitation).toMatchObject({
+      invitation: { role: "FamilyHelper", version: 1 },
+      householdVersion: 2,
+    });
+    expect(JSON.stringify(invitation)).not.toContain(email);
+
+    const messages = await fetch("http://127.0.0.1:8025/api/v1/messages");
+    expect(messages.ok).toBe(true);
+    const body = (await messages.json()) as { messages?: MailpitSummary[] };
+    const summary = body.messages?.find((message) =>
+      message.To.some((recipient) => recipient.Address === email),
+    );
+    expect(summary?.Subject).toBe("Legacy Vault household invitation");
+    const captured = await fetch(
+      `http://127.0.0.1:8025/view/${summary?.ID}.txt`,
+    );
+    const text = await captured.text();
+    expect(text).toMatch(/\/members\/invitations\/[A-Za-z0-9_-]{43}/u);
+    expect(text).toContain("This link expires in 72 hours.");
+  }, 20_000);
+
   it("fails closed through the production authorizer and appends content-free allow and deny decisions", async () => {
     const organizationId = randomUUID();
     const householdId = randomUUID();

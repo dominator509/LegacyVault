@@ -34,6 +34,12 @@ export interface AuthenticatedTenantIdentity extends ResolvedMembershipIdentity 
   mfaVerifiedAt?: string;
 }
 
+export interface AuthenticatedAccountIdentity {
+  authUserId: string;
+  email: string;
+  emailVerified: true;
+}
+
 const roles = new Set<Role>([
   "Owner",
   "CoOwner",
@@ -259,9 +265,36 @@ export function requireIdentityAuthorization(
 
 export interface AuthSessionReader {
   getSession(input: { headers: Headers }): Promise<{
-    user: { id: string; twoFactorEnabled?: boolean };
+    user: {
+      id: string;
+      email?: string;
+      emailVerified?: boolean;
+      twoFactorEnabled?: boolean;
+    };
     session: { createdAt: Date | string };
   } | null>;
+}
+
+export async function resolveRequestAccount(
+  authApi: AuthSessionReader,
+  headers: IncomingHttpHeaders,
+): Promise<AuthenticatedAccountIdentity> {
+  const session = await authApi.getSession({
+    headers: fromNodeHeaders(headers),
+  });
+  if (!session)
+    throw new AuthenticationRequiredError("authentication required");
+  if (
+    !session.user.emailVerified ||
+    typeof session.user.email !== "string" ||
+    session.user.email.length < 3
+  )
+    throw new AuthenticationRequiredError("verified email required");
+  return {
+    authUserId: session.user.id,
+    email: session.user.email,
+    emailVerified: true,
+  };
 }
 
 export async function resolveRequestIdentity(

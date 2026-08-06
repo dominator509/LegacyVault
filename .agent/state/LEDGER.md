@@ -279,3 +279,12 @@
 2026-08-06T06:02:47Z | codex | EP-004 | HYPOTHESIS | honor_bounded_Fastify_4xx_parse_statuses_in_the_shared_vault_error_mapper_without_disclosing_parser_details
 2026-08-06T06:02:51Z | codex | EP-004 | HEARTBEAT | OpenAPI_write_headers_bodies_stable_ProblemDetails_Stripe_contract_loopback_only_Schemathesis_4_24_3_coverage_27_fuzzing_27_generated_1336_passed_focused_API_18_billing_2_type_ok
 2026-08-06T06:08:34Z | codex | EP-004 | HEARTBEAT | OpenAPI_write_contract_checkpoint_unit_41_integration_58_e2e_3_contract_1336_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T07:08:09Z | codex | EP-004 | SIG | full_integration_invitation_correct_account_after_wrong_account_probe_returned_404_exit_1_while_60_of_61_tests_passed
+2026-08-06T07:08:09Z | codex | EP-004 | HYPOTHESIS | isolate_repository_email_binding_and_remove_shared_mutable_account_resolver_from_HTTP_fixture
+2026-08-06T07:08:09Z | codex | EP-004 | SIG | stable_account_focused_invitation_test_still_returned_404_after_direct_correct_token_email_lookup_succeeded
+2026-08-06T07:08:09Z | codex | EP-004 | HYPOTHESIS | capture_the_exact_acceptance_stage_to_distinguish_second_lookup_key_access_and_atomic_write_failure
+2026-08-06T07:08:09Z | codex | EP-004 | SIG | atomic_acceptance_write_reported_membership_invitation_unavailable_because_token_SELECT_policy_did_not_satisfy_UPDATE_RLS_for_SELECT_FOR_UPDATE
+2026-08-06T07:08:09Z | codex | EP-004 | HYPOTHESIS | validate_under_token_select_policy_then_set_invitation_tenant_context_lock_the_same_row_and_revalidate_before_writes
+2026-08-06T07:13:25Z | codex | EP-004 | SIG | verify_wrapper_preflight_stopped_on_unavailable_STRIPE_SECRET_KEY_exit_1_before_independent_gates
+2026-08-06T07:13:25Z | codex | EP-004 | HYPOTHESIS | preserve_external_release_blocker_and_run_each_remaining_COMMANDS_declared_gate_in_verify_order
+2026-08-06T07:13:25Z | codex | EP-004 | HEARTBEAT | verified_account_first_household_encrypted_owner_membership_listing_token_hashed_email_bound_invitation_real_Mailpit_72h_delivery_atomic_RLS_acceptance_and_encrypted_member_listing_unit_42_integration_61_e2e_3_contract_1543_live_fire_2_format_lint_type_build_security_dependency_audit_reality_smoke_ok

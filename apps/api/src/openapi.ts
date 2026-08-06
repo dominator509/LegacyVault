@@ -35,3 +35,40 @@ export const standardProblemResponses = {
   500: { description: "Request failed", content: problemContent },
   503: { description: "Dependency unavailable", content: problemContent },
 } as const;
+
+const idempotencyKeyHeader = {
+  type: "string",
+  minLength: 16,
+  maxLength: 200,
+  pattern: "^[A-Za-z0-9._:-]+$",
+} as const;
+
+export const creationWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": idempotencyKeyHeader,
+    "if-match": { type: "string", const: "0" },
+  },
+} as const;
+
+export const optimisticWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": idempotencyKeyHeader,
+    "if-match": { type: "string", pattern: "^[1-9][0-9]*$" },
+  },
+} as const;
+
+export const mutationWriteHeaderSchema = {
+  type: "object",
+  additionalProperties: true,
+  required: ["idempotency-key", "if-match"],
+  properties: {
+    "idempotency-key": idempotencyKeyHeader,
+    "if-match": { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
+  },
+} as const;

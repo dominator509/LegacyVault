@@ -54,6 +54,42 @@ export const memberships = pgTable("memberships", {
   active: integer("active").notNull().default(1),
   ...versioned,
 });
+export const accountIdempotencyRecords = pgTable(
+  "account_idempotency_records",
+  {
+    authUserId: text("auth_user_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    responseBody: jsonb("response_body"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("account_idempotency_records_key_unique").on(
+      table.authUserId,
+      table.idempotencyKey,
+    ),
+  ],
+);
+export const membershipInvitations = pgTable(
+  "membership_invitations",
+  {
+    id: uuid("id").primaryKey(),
+    ...tenant,
+    emailHash: text("email_hash").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    role: text("role").notNull(),
+    invitedBy: uuid("invited_by").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    acceptedByAuthUserId: text("accepted_by_auth_user_id"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    ...versioned,
+  },
+  (table) => [
+    uniqueIndex("membership_invitations_token_unique").on(table.tokenHash),
+  ],
+);
 export const permissionGrants = pgTable("permission_grants", {
   id: uuid("id").primaryKey(),
   ...tenant,

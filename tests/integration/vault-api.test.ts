@@ -1,10 +1,17 @@
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildServer } from "../../apps/api/src/server.js";
 import { createDatabaseClient } from "../../packages/database/src/client.js";
 import { runMigrations } from "../../packages/database/src/migrate.js";
 import { VaultRepository } from "../../packages/database/src/repository.js";
 import { requireIdentityAuthorization } from "../../packages/auth/src/index.js";
+import {
+  createWrappedHouseholdKey,
+  decryptEnvelope,
+  encryptEnvelope,
+  type EncryptedEnvelope,
+  PostgresHouseholdKeyStore,
+} from "../../packages/crypto/src/index.js";
 import { readLocalEnvironment } from "../helpers/local-environment.js";
 
 const local = readLocalEnvironment();
@@ -21,7 +28,17 @@ const identity = {
   sessionIssuedAt: new Date().toISOString(),
   mfaVerifiedAt: new Date().toISOString(),
 };
+const account = {
+  authUserId: `onboarding-${randomUUID()}`,
+  email: `onboarding-${randomUUID()}@example.test`,
+  emailVerified: true as const,
+};
+const onboardingKek = Buffer.alloc(32, 29);
 const repository = new VaultRepository(databaseUrl);
+const householdKeyStore = new PostgresHouseholdKeyStore(
+  databaseUrl,
+  onboardingKek,
+);
 const authorizationScopes: {
   category: string;
   action: string;
@@ -33,13 +50,148 @@ let observedAiInterview: unknown;
 let observedDocumentUpload: unknown;
 let observedReportId: string | undefined;
 let observedFactCategories: readonly string[] = [];
+let observedInvitationToken = "";
 const completedExportId = randomUUID();
 const server = buildServer({
   repository,
+  resolveAccount: async () => account,
   resolveIdentity: async () => identity,
   authorizeIdentity: (resolved, scope) => {
     requireIdentityAuthorization(resolved, scope);
     authorizationScopes.push(scope);
+  },
+  createHousehold: async (resolvedAccount, input) => {
+    const organizationId = randomUUID();
+    const householdId = randomUUID();
+    const personId = randomUUID();
+    const generated = createWrappedHouseholdKey({
+      keyEncryptionKey: onboardingKek,
+      organizationId,
+      householdId,
+      keyVersion: 1,
+    });
+    const plaintext = Buffer.from(input.ownerDisplayName, "utf8");
+    try {
+      const envelope = encryptEnvelope(plaintext, generated.plaintextKey, {
+        organizationId,
+        householdId,
+        recordId: personId,
+        purpose: "person-display-name",
+        keyVersion: 1,
+      });
+      return repository.createHouseholdForAccount(resolvedAccount, {
+        ...input,
+        organizationId,
+        householdId,
+        personId,
+        membershipId: randomUUID(),
+        displayNameCiphertext: Buffer.from(JSON.stringify(envelope), "utf8"),
+        keyVersion: 1,
+        householdKeyId: randomUUID(),
+        wrappedHouseholdKey: generated.wrappedKey,
+      });
+    } finally {
+      plaintext.fill(0);
+      generated.plaintextKey.fill(0);
+    }
+  },
+  listHouseholds: (resolvedAccount) =>
+    repository.listHouseholdsForAccount(resolvedAccount),
+  listMembers: async (resolved) => {
+    const members = await repository.listHouseholdMembers(resolved);
+    const key = await householdKeyStore.getOrCreateActiveKey(resolved);
+    try {
+      return members.map((member) => {
+        const opened = decryptEnvelope(
+          JSON.parse(
+            Buffer.from(member.displayNameCiphertext).toString("utf8"),
+          ) as EncryptedEnvelope,
+          key.plaintextKey,
+          {
+            organizationId: resolved.organizationId,
+            householdId: resolved.householdId,
+            recordId: member.personId,
+            purpose: "person-display-name",
+            keyVersion: member.keyVersion,
+          },
+        );
+        try {
+          return {
+            id: member.id,
+            displayName: Buffer.from(opened).toString("utf8"),
+            role: member.role,
+            active: member.active,
+            version: member.version,
+          };
+        } finally {
+          opened.fill(0);
+        }
+      });
+    } finally {
+      key.plaintextKey.fill(0);
+    }
+  },
+  createInvitation: async (resolved, input) => {
+    const emailHash = createHmac("sha256", onboardingKek)
+      .update(`membership-invite-email:${input.email}`)
+      .digest("hex");
+    observedInvitationToken = createHmac("sha256", onboardingKek)
+      .update(
+        `membership-invite-token:${resolved.organizationId}:${resolved.householdId}:${input.idempotencyKey}:${emailHash}`,
+      )
+      .digest("base64url");
+    return repository.createMembershipInvitation(resolved, {
+      idempotencyKey: input.idempotencyKey,
+      expectedHouseholdVersion: input.expectedHouseholdVersion,
+      invitationId: randomUUID(),
+      emailHash,
+      tokenHash: createHash("sha256")
+        .update(observedInvitationToken)
+        .digest("hex"),
+      role: input.role,
+      invitedBy: resolved.membershipId,
+      expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1_000).toISOString(),
+    });
+  },
+  acceptInvitation: async (resolvedAccount, input) => {
+    const tokenHash = createHash("sha256").update(input.token).digest("hex");
+    const emailHash = createHmac("sha256", onboardingKek)
+      .update(
+        `membership-invite-email:${resolvedAccount.email.trim().toLowerCase()}`,
+      )
+      .digest("hex");
+    const invitation = await repository.getMembershipInvitationForAcceptance(
+      resolvedAccount,
+      { tokenHash, emailHash, now: new Date().toISOString() },
+    );
+    if (!invitation) throw new Error("membership invitation unavailable");
+    const key = await householdKeyStore.getOrCreateActiveKey(invitation);
+    const personId = randomUUID();
+    const plaintext = Buffer.from(input.displayName, "utf8");
+    try {
+      const envelope = encryptEnvelope(plaintext, key.plaintextKey, {
+        organizationId: invitation.organizationId,
+        householdId: invitation.householdId,
+        recordId: personId,
+        purpose: "person-display-name",
+        keyVersion: key.keyVersion,
+      });
+      return await repository.acceptMembershipInvitation(resolvedAccount, {
+        idempotencyKey: input.idempotencyKey,
+        tokenHash,
+        emailHash,
+        displayNameHash: createHash("sha256").update(plaintext).digest("hex"),
+        expectedInvitationVersion: input.expectedInvitationVersion,
+        personId,
+        membershipId: randomUUID(),
+        displayNameCiphertext: Buffer.from(JSON.stringify(envelope), "utf8"),
+        keyVersion: key.keyVersion,
+        acceptedAt: new Date().toISOString(),
+      });
+    } finally {
+      plaintext.fill(0);
+      key.plaintextKey.fill(0);
+    }
   },
   startPortableExport: async (_resolved, input) => {
     observedExportKey = input.exportKey;
@@ -177,6 +329,10 @@ beforeAll(async () => {
   await client.connect();
   try {
     await client.query("begin");
+    await client.query(
+      'insert into "user" ("id","name","email","emailVerified","createdAt","updatedAt") values ($1,$2,$3,true,now(),now())',
+      [account.authUserId, "Onboarding Test", account.email],
+    );
     await client.query("select set_config('app.organization_id', $1, true)", [
       identity.organizationId,
     ]);
@@ -191,13 +347,49 @@ beforeAll(async () => {
       "insert into households(id,organization_id,name) values ($1,$2,$3)",
       [identity.householdId, identity.organizationId, "API Test Household"],
     );
+    const householdKey = createWrappedHouseholdKey({
+      keyEncryptionKey: onboardingKek,
+      organizationId: identity.organizationId,
+      householdId: identity.householdId,
+      keyVersion: 1,
+    });
+    let ownerDisplayCiphertext: Buffer;
+    try {
+      ownerDisplayCiphertext = Buffer.from(
+        JSON.stringify(
+          encryptEnvelope(
+            Buffer.from("API Test Owner", "utf8"),
+            householdKey.plaintextKey,
+            {
+              organizationId: identity.organizationId,
+              householdId: identity.householdId,
+              recordId: identity.actorId,
+              purpose: "person-display-name",
+              keyVersion: 1,
+            },
+          ),
+        ),
+        "utf8",
+      );
+      await client.query(
+        "insert into household_keys(id,organization_id,household_id,key_version,wrapped_key,status,created_at) values ($1,$2,$3,1,$4,'active',now())",
+        [
+          randomUUID(),
+          identity.organizationId,
+          identity.householdId,
+          JSON.stringify(householdKey.wrappedKey),
+        ],
+      );
+    } finally {
+      householdKey.plaintextKey.fill(0);
+    }
     await client.query(
       "insert into people(id,organization_id,household_id,display_name_encrypted,key_version) values ($1,$2,$3,$4,1)",
       [
         identity.actorId,
         identity.organizationId,
         identity.householdId,
-        Buffer.from("encrypted-test-identity"),
+        ownerDisplayCiphertext,
       ],
     );
     await client.query(
@@ -218,6 +410,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server.close();
+  await householdKeyStore.close();
   await repository.close();
 });
 
@@ -254,6 +447,8 @@ describe("vault API persistence", () => {
     expect(specification.openapi).toBe("3.1.0");
     expect(specification.components?.schemas).toHaveProperty("ProblemDetails");
     for (const path of [
+      "/v1/households",
+      "/v1/members",
       "/v1/facts",
       "/v1/documents",
       "/v1/audit-events",
@@ -297,6 +492,136 @@ describe("vault API persistence", () => {
         path,
       ).toBe("#/components/schemas/ProblemDetails");
     }
+  });
+
+  it("creates and replays a first encrypted household without requiring an existing membership", async () => {
+    const key = `household-${randomUUID()}`;
+    const payload = {
+      organizationName: "Continuity Test Organization",
+      householdName: "Continuity Test Household",
+      ownerDisplayName: "Verified Account Owner",
+    };
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/households",
+      headers: { "idempotency-key": key, "if-match": "0" },
+      payload,
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      household: { name: payload.householdName, version: 1 },
+      membership: { role: "Owner", version: 1 },
+    });
+    expect(created.body).not.toContain(payload.ownerDisplayName);
+    const replay = await server.inject({
+      method: "POST",
+      url: "/v1/households",
+      headers: { "idempotency-key": key, "if-match": "0" },
+      payload,
+    });
+    expect(replay.statusCode).toBe(201);
+    expect(replay.json()).toEqual(created.json());
+    const listed = await server.inject({
+      method: "GET",
+      url: "/v1/households",
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json()).toMatchObject({
+      households: [
+        expect.objectContaining({
+          id: created.json<{ household: { id: string } }>().household.id,
+          name: payload.householdName,
+          role: "Owner",
+        }),
+      ],
+    });
+  });
+
+  it("persists a token-hashed member invitation and accepts it only for the invited verified email", async () => {
+    const invitationKey = `member-invite-${randomUUID()}`;
+    const invited = await server.inject({
+      method: "POST",
+      url: "/v1/members/invitations",
+      headers: { "idempotency-key": invitationKey, "if-match": "1" },
+      payload: { email: account.email, role: "FamilyHelper" },
+    });
+    expect(invited.statusCode).toBe(201);
+    expect(invited.json()).toMatchObject({
+      invitation: { role: "FamilyHelper", version: 1 },
+      householdVersion: 2,
+    });
+    expect(invited.body).not.toContain(account.email);
+    expect(invited.body).not.toContain(observedInvitationToken);
+    expect(observedInvitationToken).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+
+    const wrongAccount = {
+      authUserId: `wrong-invite-${randomUUID()}`,
+      email: `wrong-invite-${randomUUID()}@example.test`,
+      emailVerified: true as const,
+    };
+    const wrongAcceptanceContext =
+      await repository.getMembershipInvitationForAcceptance(wrongAccount, {
+        tokenHash: createHash("sha256")
+          .update(observedInvitationToken)
+          .digest("hex"),
+        emailHash: createHmac("sha256", onboardingKek)
+          .update(`membership-invite-email:${wrongAccount.email}`)
+          .digest("hex"),
+        now: new Date().toISOString(),
+      });
+    expect(wrongAcceptanceContext).toBeNull();
+    const acceptanceContext =
+      await repository.getMembershipInvitationForAcceptance(account, {
+        tokenHash: createHash("sha256")
+          .update(observedInvitationToken)
+          .digest("hex"),
+        emailHash: createHmac("sha256", onboardingKek)
+          .update(`membership-invite-email:${account.email}`)
+          .digest("hex"),
+        now: new Date().toISOString(),
+      });
+    expect(acceptanceContext).toMatchObject({
+      householdId: identity.householdId,
+      version: 1,
+    });
+
+    const acceptanceKey = `member-accept-${randomUUID()}`;
+    const accepted = await server.inject({
+      method: "POST",
+      url: `/v1/members/invitations/${observedInvitationToken}/accept`,
+      headers: { "idempotency-key": acceptanceKey, "if-match": "1" },
+      payload: { displayName: "Invited Family Helper" },
+    });
+    expect(accepted.statusCode).toBe(200);
+    expect(accepted.json()).toMatchObject({
+      household: { id: identity.householdId, version: 3 },
+      membership: { role: "FamilyHelper", version: 1 },
+    });
+    expect(accepted.body).not.toContain("Invited Family Helper");
+    const replay = await server.inject({
+      method: "POST",
+      url: `/v1/members/invitations/${observedInvitationToken}/accept`,
+      headers: { "idempotency-key": acceptanceKey, "if-match": "1" },
+      payload: { displayName: "Invited Family Helper" },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json()).toEqual(accepted.json());
+    const members = await server.inject({ method: "GET", url: "/v1/members" });
+    expect(members.statusCode).toBe(200);
+    expect(members.headers["cache-control"]).toBe("no-store");
+    expect(members.json()).toMatchObject({
+      members: expect.arrayContaining([
+        expect.objectContaining({
+          displayName: "API Test Owner",
+          role: "Owner",
+        }),
+        expect.objectContaining({
+          displayName: "Invited Family Helper",
+          role: "FamilyHelper",
+        }),
+      ]),
+    });
   });
 
   it("returns no-store category-scoped facts and secret-free document metadata", async () => {

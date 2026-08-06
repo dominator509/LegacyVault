@@ -16,7 +16,12 @@ import {
 import type { PermissionAction, RecordCategory } from "@legacy/domain";
 import type { ReportKind } from "@legacy/domain";
 import { scanDlp } from "@legacy/ai-gateway";
-import { standardProblemResponses } from "../openapi.js";
+import {
+  creationWriteHeaderSchema,
+  mutationWriteHeaderSchema,
+  optimisticWriteHeaderSchema,
+  standardProblemResponses,
+} from "../openapi.js";
 
 export type IdentityResolver = (
   request: FastifyRequest,
@@ -75,51 +80,6 @@ function idempotencyKey(request: FastifyRequest): string {
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-
-const creationWriteHeaderSchema = {
-  type: "object",
-  additionalProperties: true,
-  required: ["idempotency-key", "if-match"],
-  properties: {
-    "idempotency-key": {
-      type: "string",
-      minLength: 16,
-      maxLength: 200,
-      pattern: "^[A-Za-z0-9._:-]+$",
-    },
-    "if-match": { type: "string", const: "0" },
-  },
-} as const;
-
-const optimisticWriteHeaderSchema = {
-  type: "object",
-  additionalProperties: true,
-  required: ["idempotency-key", "if-match"],
-  properties: {
-    "idempotency-key": {
-      type: "string",
-      minLength: 16,
-      maxLength: 200,
-      pattern: "^[A-Za-z0-9._:-]+$",
-    },
-    "if-match": { type: "string", pattern: "^[1-9][0-9]*$" },
-  },
-} as const;
-
-const mutationWriteHeaderSchema = {
-  type: "object",
-  additionalProperties: true,
-  required: ["idempotency-key", "if-match"],
-  properties: {
-    "idempotency-key": {
-      type: "string",
-      minLength: 16,
-      maxLength: 200,
-      pattern: "^[A-Za-z0-9._:-]+$",
-    },
-    "if-match": { type: "string", pattern: "^(0|[1-9][0-9]*)$" },
-  },
-} as const;
 
 const uuidPathSchema = {
   type: "object",

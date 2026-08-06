@@ -1,16 +1,18 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import { PostgresAuditStore } from "@legacy/audit";
 import {
   AuthorizationDeniedError,
   createLegacyAuth,
   MembershipIdentityStore,
   requireIdentityAuthorization,
+  resolveRequestAccount,
   resolveRequestIdentity,
 } from "@legacy/auth";
 import type { Environment } from "@legacy/contracts/environment";
 import {
   decryptEnvelope,
   encryptEnvelope,
+  createWrappedHouseholdKey,
   PostgresHouseholdKeyStore,
   type EncryptedEnvelope,
 } from "@legacy/crypto";
@@ -207,12 +209,186 @@ export function createApplicationRuntime(environment: Environment): {
       stripe,
       auth: authRuntime.auth,
       authBaseUrl: environment.API_BASE_URL,
+      resolveAccount: (request) =>
+        resolveRequestAccount(
+          { getSession: (input) => authRuntime.auth.api.getSession(input) },
+          request.headers,
+        ),
       resolveIdentity: (request) =>
         resolveRequestIdentity(
           { getSession: (input) => authRuntime.auth.api.getSession(input) },
           identityStore,
           request.headers,
         ),
+      createHousehold: async (account, input) => {
+        const organizationId = randomUUID();
+        const householdId = randomUUID();
+        const personId = randomUUID();
+        const membershipId = randomUUID();
+        const householdKeyId = randomUUID();
+        const generated = createWrappedHouseholdKey({
+          keyEncryptionKey: applicationKek,
+          organizationId,
+          householdId,
+          keyVersion: 1,
+        });
+        const displayName = Buffer.from(input.ownerDisplayName, "utf8");
+        try {
+          const envelope = encryptEnvelope(
+            displayName,
+            generated.plaintextKey,
+            {
+              organizationId,
+              householdId,
+              recordId: personId,
+              purpose: "person-display-name",
+              keyVersion: 1,
+            },
+          );
+          return repository.createHouseholdForAccount(account, {
+            ...input,
+            organizationId,
+            householdId,
+            personId,
+            membershipId,
+            displayNameCiphertext: Buffer.from(
+              JSON.stringify(envelope),
+              "utf8",
+            ),
+            keyVersion: 1,
+            householdKeyId,
+            wrappedHouseholdKey: generated.wrappedKey,
+          });
+        } finally {
+          displayName.fill(0);
+          generated.plaintextKey.fill(0);
+        }
+      },
+      listHouseholds: (account) => repository.listHouseholdsForAccount(account),
+      listMembers: async (identity) => {
+        const members = await repository.listHouseholdMembers(identity);
+        const key = await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          return members.map((member) => {
+            if (member.keyVersion !== key.keyVersion)
+              throw new Error("member display-name key version is unavailable");
+            let opened: Uint8Array | undefined;
+            try {
+              opened = decryptEnvelope(
+                storedEnvelope(
+                  JSON.parse(
+                    Buffer.from(member.displayNameCiphertext).toString("utf8"),
+                  ),
+                ),
+                key.plaintextKey,
+                {
+                  organizationId: identity.organizationId,
+                  householdId: identity.householdId,
+                  recordId: member.personId,
+                  purpose: "person-display-name",
+                  keyVersion: member.keyVersion,
+                },
+              );
+              return {
+                id: member.id,
+                role: member.role,
+                active: member.active,
+                version: member.version,
+                displayName: Buffer.from(opened).toString("utf8"),
+              };
+            } finally {
+              opened?.fill(0);
+            }
+          });
+        } finally {
+          key.plaintextKey.fill(0);
+        }
+      },
+      createInvitation: async (identity, input) => {
+        const emailHash = createHmac("sha256", applicationKek)
+          .update(`membership-invite-email:${input.email}`)
+          .digest("hex");
+        const token = createHmac("sha256", applicationKek)
+          .update(
+            `membership-invite-token:${identity.organizationId}:${identity.householdId}:${input.idempotencyKey}:${emailHash}`,
+          )
+          .digest("base64url");
+        const tokenHash = createHash("sha256").update(token).digest("hex");
+        const invitation = await repository.createMembershipInvitation(
+          identity,
+          {
+            idempotencyKey: input.idempotencyKey,
+            expectedHouseholdVersion: input.expectedHouseholdVersion,
+            invitationId: randomUUID(),
+            emailHash,
+            tokenHash,
+            role: input.role,
+            invitedBy: identity.membershipId,
+            expiresAt: new Date(
+              Date.now() + 72 * 60 * 60 * 1_000,
+            ).toISOString(),
+          },
+        );
+        const invitationUrl = `${environment.APP_BASE_URL}/members/invitations/${encodeURIComponent(token)}`;
+        await email.send({
+          to: input.email,
+          subject: "Legacy Vault household invitation",
+          text: `Accept your household invitation: ${invitationUrl}\nThis link expires in 72 hours.`,
+          html: `<p>You were invited to a Legacy Vault household.</p><p><a href="${htmlEscape(invitationUrl)}">Accept invitation</a></p><p>This link expires in 72 hours.</p>`,
+          idempotencyKey: `member-invite:${invitation.invitation.id}`,
+        });
+        return invitation;
+      },
+      acceptInvitation: async (account, input) => {
+        const tokenHash = createHash("sha256")
+          .update(input.token)
+          .digest("hex");
+        const emailHash = createHmac("sha256", applicationKek)
+          .update(
+            `membership-invite-email:${account.email.trim().toLowerCase()}`,
+          )
+          .digest("hex");
+        const now = new Date().toISOString();
+        const invitation =
+          await repository.getMembershipInvitationForAcceptance(account, {
+            tokenHash,
+            emailHash,
+            now,
+          });
+        if (!invitation) throw new Error("membership invitation unavailable");
+        const key = await householdKeyStore.getOrCreateActiveKey(invitation);
+        const personId = randomUUID();
+        const plaintext = Buffer.from(input.displayName, "utf8");
+        try {
+          const envelope = encryptEnvelope(plaintext, key.plaintextKey, {
+            organizationId: invitation.organizationId,
+            householdId: invitation.householdId,
+            recordId: personId,
+            purpose: "person-display-name",
+            keyVersion: key.keyVersion,
+          });
+          return repository.acceptMembershipInvitation(account, {
+            idempotencyKey: input.idempotencyKey,
+            tokenHash,
+            emailHash,
+            displayNameHash: createHash("sha256")
+              .update(plaintext)
+              .digest("hex"),
+            expectedInvitationVersion: input.expectedInvitationVersion,
+            personId,
+            membershipId: randomUUID(),
+            displayNameCiphertext: Buffer.from(
+              JSON.stringify(envelope),
+              "utf8",
+            ),
+            keyVersion: key.keyVersion,
+            acceptedAt: now,
+          });
+        } finally {
+          plaintext.fill(0);
+          key.plaintextKey.fill(0);
+        }
+      },
       authorizeIdentity: async (identity, scope) => {
         try {
           requireIdentityAuthorization(identity, scope);

@@ -13,20 +13,69 @@ import { problemDetailsSchema } from "./openapi.js";
 import type { StripeAdapter } from "./adapters/stripe.js";
 import { registerAuthRoutes, type AuthHandler } from "./routes/auth.js";
 import { createApplicationRuntime } from "./runtime.js";
-import type { AuthenticatedTenantIdentity } from "@legacy/auth";
 import type { StartedPortableExport } from "@legacy/database/repository";
 import type { StartedDocumentProcessing } from "@legacy/database/repository";
 import type { ConfirmedPrivacyDeletion } from "@legacy/database/repository";
 import type { CancelledPrivacyDeletion } from "@legacy/database/repository";
 import type { RecordCategory, ReportKind } from "@legacy/domain";
+import {
+  registerHouseholdRoutes,
+  type AccountResolver,
+} from "./routes/households.js";
+import type {
+  AuthenticatedAccountIdentity,
+  AuthenticatedTenantIdentity,
+} from "@legacy/auth";
+import type { HouseholdMembershipSummary } from "@legacy/database/repository";
 
 export interface ServerDependencies {
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
+  resolveAccount?: AccountResolver;
   authorizeIdentity?: IdentityAuthorizer;
   stripe?: StripeAdapter;
   auth?: AuthHandler;
   authBaseUrl?: string;
+  createHousehold?: (
+    account: AuthenticatedAccountIdentity,
+    input: {
+      idempotencyKey: string;
+      expectedVersion: 0;
+      organizationName: string;
+      householdName: string;
+      ownerDisplayName: string;
+    },
+  ) => Promise<unknown>;
+  listHouseholds?: (
+    account: AuthenticatedAccountIdentity,
+  ) => Promise<HouseholdMembershipSummary[]>;
+  listMembers?: (
+    identity: AuthenticatedTenantIdentity,
+  ) => Promise<readonly unknown[]>;
+  createInvitation?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      email: string;
+      role:
+        | "CoOwner"
+        | "Editor"
+        | "FamilyHelper"
+        | "ProfessionalAdvisor"
+        | "ReadOnlyViewer"
+        | "EmergencyRecipient";
+      expectedHouseholdVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
+  acceptInvitation?: (
+    account: AuthenticatedAccountIdentity,
+    input: {
+      token: string;
+      displayName: string;
+      expectedInvitationVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
   startPortableExport?: (
     identity: AuthenticatedTenantIdentity,
     input: { idempotencyKey: string; exportKey: Uint8Array },
@@ -235,6 +284,28 @@ export function buildServer(dependencies?: ServerDependencies) {
   if (dependencies)
     server.register(async (instance) =>
       registerVaultRoutes(instance, dependencies),
+    );
+  if (
+    dependencies?.resolveAccount &&
+    dependencies.createHousehold &&
+    dependencies.listHouseholds &&
+    dependencies.listMembers &&
+    dependencies.createInvitation &&
+    dependencies.acceptInvitation
+  )
+    server.register(async (instance) =>
+      registerHouseholdRoutes(instance, {
+        resolveAccount: dependencies.resolveAccount!,
+        resolveIdentity: dependencies.resolveIdentity,
+        ...(dependencies.authorizeIdentity
+          ? { authorizeIdentity: dependencies.authorizeIdentity }
+          : {}),
+        createHousehold: dependencies.createHousehold!,
+        listHouseholds: dependencies.listHouseholds!,
+        listMembers: dependencies.listMembers!,
+        createInvitation: dependencies.createInvitation!,
+        acceptInvitation: dependencies.acceptInvitation!,
+      }),
     );
   if (dependencies?.stripe)
     server.register(async (instance) =>
