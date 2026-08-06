@@ -94,6 +94,14 @@ function signedEvent(input: { id: string; created: number; status: string }) {
 
 describe("signed Stripe webhook persistence", () => {
   it("applies once and ignores both replay and an older event", async () => {
+    await expect(
+      repository.getSubscription({ organizationId, householdId, actorId }),
+    ).resolves.toEqual({
+      status: "inactive",
+      plan: null,
+      providerUpdatedAt: null,
+      version: 0,
+    });
     const newest = signedEvent({
       id: `evt_${randomUUID()}`,
       created: 2_000_000_000,
@@ -135,6 +143,14 @@ describe("signed Stripe webhook persistence", () => {
       payload: older.payload,
     });
     expect(stale.json()).toEqual({ received: true, outcome: "stale" });
+    await expect(
+      repository.getSubscription({ organizationId, householdId, actorId }),
+    ).resolves.toEqual({
+      status: "active",
+      plan: "essential",
+      providerUpdatedAt: new Date(2_000_000_000 * 1_000).toISOString(),
+      version: 1,
+    });
   });
 
   it("rejects a bad signature without persisting the event", async () => {

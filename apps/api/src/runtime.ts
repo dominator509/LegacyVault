@@ -514,6 +514,7 @@ export function createApplicationRuntime(environment: Environment): {
           householdId: identity.householdId,
           plan: "essential",
         }),
+      getSubscription: (identity) => repository.getSubscription(identity),
       startDocumentUpload: async (identity, input) => {
         const id = randomUUID();
         const dataKey = randomBytes(32);

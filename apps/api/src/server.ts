@@ -81,6 +81,7 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     idempotencyKey: string,
   ) => Promise<{ id: string; url: string }>;
+  getSubscription?: (identity: AuthenticatedTenantIdentity) => Promise<unknown>;
   startDocumentUpload?: (
     identity: AuthenticatedTenantIdentity,
     input: {
@@ -163,6 +164,7 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.createReport ||
       !dependencies.getReport ||
       !dependencies.createCheckout ||
+      !dependencies.getSubscription ||
       !dependencies.startDocumentUpload ||
       !dependencies.createDocumentUploadUrl ||
       !dependencies.completeDocumentUpload ||

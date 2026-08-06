@@ -170,6 +170,9 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       idempotencyKey: string,
     ) => Promise<{ id: string; url: string }>;
+    getSubscription?: (
+      identity: AuthenticatedTenantIdentity,
+    ) => Promise<unknown>;
     startDocumentUpload?: (
       identity: AuthenticatedTenantIdentity,
       input: {
@@ -1623,5 +1626,23 @@ export async function registerVaultRoutes(
         "Billing checkout could not be created.",
       );
     }
+  });
+
+  server.get("/v1/billing/subscription", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.getSubscription)
+      throw new ApiProblem(
+        503,
+        "Billing unavailable",
+        "Subscription retrieval is not configured.",
+      );
+    await dependencies.authorizeIdentity?.(identity, {
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.billing.read",
+    });
+    return reply
+      .header("cache-control", "no-store")
+      .send(await dependencies.getSubscription(identity));
   });
 }

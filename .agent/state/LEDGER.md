@@ -247,3 +247,7 @@
 2026-08-06T03:32:03Z | codex | EP-004 | HYPOTHESIS | inventory_literal_v1_route_fragments_and_read_SPEC003_with_the_verified_cmd_type_bridge
 2026-08-06T03:32:03Z | codex | EP-004 | HEARTBEAT | owner_authorized_no_store_bounded_audit_page_full_chain_verified_repeatable_read_pseudonymized_internal_tenant_ids_stripped_focused_17_tests_format_type_security_ok
 2026-08-06T03:34:15Z | codex | EP-004 | HEARTBEAT | audit_events_checkpoint_unit_41_integration_56_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:37:59Z | codex | EP-004 | SIG | first_subscription_read_patch_verification_failed_on_nonexistent_expected_billing_test_context_before_any_file_change
+2026-08-06T03:37:59Z | codex | EP-004 | HYPOTHESIS | apply_the_source_changes_without_the_unneeded_empty_test_anchor_then_patch_the_real_billing_webhook_test_after_reading_it
+2026-08-06T03:37:59Z | codex | EP-004 | HEARTBEAT | owner_authorized_no_store_subscription_read_inactive_before_event_ordered_signed_webhook_active_status_no_provider_identifiers_focused_19_tests_format_type_security_ok
+2026-08-06T03:40:04Z | codex | EP-004 | HEARTBEAT | subscription_status_checkpoint_unit_41_integration_57_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

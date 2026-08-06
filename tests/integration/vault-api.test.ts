@@ -132,6 +132,12 @@ const server = buildServer({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
   }),
+  getSubscription: async () => ({
+    status: "active",
+    plan: "essential",
+    providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+    version: 2,
+  }),
   startDocumentUpload: async (_resolved, input) => {
     observedDocumentUpload = input;
     return {
@@ -259,6 +265,23 @@ describe("vault API persistence", () => {
         purpose: "vault.audit.read",
       },
     ]);
+  });
+
+  it("returns authoritative subscription status without provider identifiers", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/v1/billing/subscription",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({
+      status: "active",
+      plan: "essential",
+      providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+      version: 2,
+    });
+    expect(response.body).not.toContain("providerCustomer");
+    expect(response.body).not.toContain("providerSubscription");
   });
 
   it("creates and replays an encrypted candidate fact then confirms it optimistically", async () => {

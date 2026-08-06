@@ -38,6 +38,20 @@ export interface NormalizedBillingEvent {
   status: string;
   plan: string;
 }
+
+export interface SubscriptionReadModel {
+  status:
+    | "inactive"
+    | "trialing"
+    | "active"
+    | "past_due"
+    | "canceled"
+    | "unpaid"
+    | "paused";
+  plan: string | null;
+  providerUpdatedAt: string | null;
+  version: number;
+}
 export type PrivacyRequestKind =
   "access" | "correction" | "export" | "deletion" | "appeal";
 
@@ -1594,6 +1608,35 @@ export class VaultRepository {
         [event.externalEventId],
       );
       return { outcome: subscription.rowCount === 1 ? "applied" : "stale" };
+    });
+  }
+
+  async getSubscription(
+    context: TenantContext,
+  ): Promise<SubscriptionReadModel> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        status: SubscriptionReadModel["status"];
+        plan: string;
+        provider_updated_at: Date | null;
+        version: number;
+      }>(
+        "select status,plan,provider_updated_at,version from subscriptions order by version desc limit 1",
+      );
+      const row = result.rows[0];
+      if (!row)
+        return {
+          status: "inactive",
+          plan: null,
+          providerUpdatedAt: null,
+          version: 0,
+        };
+      return {
+        status: row.status,
+        plan: row.plan,
+        providerUpdatedAt: row.provider_updated_at?.toISOString() ?? null,
+        version: row.version,
+      };
     });
   }
 
