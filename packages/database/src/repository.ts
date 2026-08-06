@@ -98,6 +98,14 @@ export interface EncryptedReportRecord {
   encryptionKeyVersion?: number;
   version: number;
 }
+export interface NotificationDeliveryInput {
+  deliveryId: string;
+  reportId: string;
+  kind: "annual-review-ready";
+  recipientEmail: string;
+  status: "pending" | "sent" | "failed";
+  providerMessageId?: string;
+}
 export interface DocumentUploadRecord {
   id: string;
   objectKey: string;
@@ -274,13 +282,14 @@ export class VaultRepository {
         status: "pending";
         version: number;
       }>(
-        "insert into reports(id,organization_id,household_id,kind,workflow_id,status,generated_at,claims,source_fact_versions) values ($1,$2,$3,$4,$5,'pending',$6,'[]','{}') returning id,kind,status,version",
+        "insert into reports(id,organization_id,household_id,kind,workflow_id,requested_by,status,generated_at,claims,source_fact_versions) values ($1,$2,$3,$4,$5,$6,'pending',$7,'[]','{}') returning id,kind,status,version",
         [
           reportId,
           context.organizationId,
           context.householdId,
           input.kind,
           workflowId,
+          context.actorId,
           input.requestedAt,
         ],
       );
@@ -453,6 +462,97 @@ export class VaultRepository {
       await client.query(
         "update workflow_runs set status='completed',completed_steps='[\"collect\",\"generate\",\"store\"]',next_step=null,last_error_class=null,version=version+1 where id=$1 and status<>'completed'",
         [input.workflowId],
+      );
+    });
+  }
+
+  async getNotificationDeliveryInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<NotificationDeliveryInput | null> {
+    return this.withTenant(context, async (client) => {
+      const eligible = await client.query<{
+        report_id: string;
+        person_id: string;
+        email: string;
+      }>(
+        `select r.id as report_id,r.requested_by as person_id,u.email
+         from reports r
+         join memberships m on m.person_id=r.requested_by and m.active=1 and m.auth_user_id is not null
+         join "user" u on u.id=m.auth_user_id and u."emailVerified"=true
+         join consents c on c.person_id=r.requested_by and c.purpose='transactional-email' and c.withdrawn_at is null
+         where r.workflow_id=$1 and r.kind='annual-review' and r.status='completed'
+         order by c.granted_at desc
+         limit 1`,
+        [workflowId],
+      );
+      const recipient = eligible.rows[0];
+      if (!recipient) return null;
+      const deliveryId = randomUUID();
+      const delivery = await client.query<{
+        id: string;
+        status: NotificationDeliveryInput["status"];
+        provider_message_id: string | null;
+      }>(
+        `insert into notification_deliveries(id,organization_id,household_id,workflow_id,recipient_person_id,kind,status,created_at)
+         values ($1,$2,$3,$4,$5,'annual-review-ready','pending',now())
+         on conflict (workflow_id,recipient_person_id,kind) do update set workflow_id=excluded.workflow_id
+         returning id,status,provider_message_id`,
+        [
+          deliveryId,
+          context.organizationId,
+          context.householdId,
+          workflowId,
+          recipient.person_id,
+        ],
+      );
+      const row = delivery.rows[0];
+      if (!row) throw new Error("notification delivery was not reserved");
+      return {
+        deliveryId: row.id,
+        reportId: recipient.report_id,
+        kind: "annual-review-ready",
+        recipientEmail: recipient.email,
+        status: row.status,
+        ...(row.provider_message_id
+          ? { providerMessageId: row.provider_message_id }
+          : {}),
+      };
+    });
+  }
+
+  async completeNotificationDelivery(
+    context: TenantContext,
+    input: {
+      deliveryId: string;
+      providerMessageId: string;
+      sentAt: string;
+    },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      const result = await client.query(
+        "update notification_deliveries set status='sent',provider_message_id=$1,sent_at=$2,last_error_class=null,attempt_count=attempt_count+1,version=version+1 where id=$3 and status<>'sent'",
+        [input.providerMessageId, input.sentAt, input.deliveryId],
+      );
+      if (result.rowCount !== 1) {
+        const existing = await client.query(
+          "select 1 from notification_deliveries where id=$1 and status='sent' and provider_message_id=$2",
+          [input.deliveryId, input.providerMessageId],
+        );
+        if (existing.rowCount !== 1)
+          throw new Error("notification completion conflict");
+      }
+    });
+  }
+
+  async recordNotificationDeliveryFailure(
+    context: TenantContext,
+    input: { deliveryId: string; errorClass: string },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      await client.query(
+        "update notification_deliveries set status='failed',last_error_class=$1,attempt_count=attempt_count+1,version=version+1 where id=$2 and status<>'sent'",
+        [input.errorClass.slice(0, 120), input.deliveryId],
       );
     });
   }

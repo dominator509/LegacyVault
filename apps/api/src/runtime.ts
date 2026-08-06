@@ -36,7 +36,7 @@ import { DocumentObjectStore } from "@legacy/documents";
 import {
   LocalSmtpCaptureAdapter,
   ResendEmailAdapter,
-} from "./adapters/email.js";
+} from "@legacy/notifications";
 import { StripeAdapter } from "./adapters/stripe.js";
 import type { ServerDependencies } from "./server.js";
 

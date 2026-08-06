@@ -16,6 +16,7 @@
     "@legacy/database": "workspace:*",
     "@legacy/domain": "workspace:*",
     "@legacy/documents": "workspace:*",
+    "@legacy/notifications": "workspace:*",
     "@legacy/reports": "workspace:*",
     "@legacy/worker": "workspace:*",
     "fastify": "5.11.2",

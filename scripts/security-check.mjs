@@ -1,13 +1,18 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const failures = [];
-const tracked = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
+const tracked = execFileSync(
+  "git",
+  ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+  { encoding: "utf8" },
+)
   .split("\0")
   .filter(Boolean);
 
 for (const file of tracked) {
+  if (!existsSync(file)) continue;
   const normalized = file.replaceAll("\\", "/");
   if (/^\.env(?:\.|$)/u.test(normalized) && normalized !== ".env.example") {
     failures.push(`${normalized}: secret-bearing environment file is tracked`);

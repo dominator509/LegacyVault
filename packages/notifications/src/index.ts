@@ -10,12 +10,27 @@ export interface EmailConfig {
   from: string;
   baseUrl?: string;
   timeoutMs: number;
+  maxAttempts?: number;
+}
+
+export class EmailProviderError extends Error {
+  override readonly name = "EmailProviderError";
+  constructor(
+    message: string,
+    readonly status: number | undefined,
+    readonly retryCount: number,
+  ) {
+    super(message);
+  }
 }
 
 export class ResendEmailAdapter {
   constructor(
     private readonly config: EmailConfig,
     private readonly transport: typeof fetch = fetch,
+    private readonly wait: (milliseconds: number) => Promise<void> = (
+      milliseconds,
+    ) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   ) {}
   readiness() {
     return this.config.apiKey && this.config.from
@@ -24,12 +39,31 @@ export class ResendEmailAdapter {
   }
   async send(message: EmailMessage): Promise<{ id: string }> {
     if (!this.config.apiKey) throw new Error("Resend is not configured");
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
-    try {
-      const response = await this.transport(
-        new URL("emails", this.config.baseUrl ?? "https://api.resend.com/"),
-        {
+    for (const value of [message.to, message.subject, this.config.from])
+      if (/\r|\n/u.test(value))
+        throw new Error("email header injection blocked");
+    const endpoint = new URL(
+      "emails",
+      this.config.baseUrl ?? "https://api.resend.com/",
+    );
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.hostname !== "api.resend.com"
+    )
+      throw new Error("Resend endpoint is invalid");
+    const maxAttempts = this.config.maxAttempts ?? 3;
+    if (
+      !Number.isSafeInteger(maxAttempts) ||
+      maxAttempts < 1 ||
+      maxAttempts > 5
+    )
+      throw new Error("Resend max attempts is invalid");
+    let lastStatus: number | undefined;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), this.config.timeoutMs);
+      try {
+        const response = await this.transport(endpoint, {
           method: "POST",
           headers: {
             authorization: `Bearer ${this.config.apiKey}`,
@@ -44,15 +78,45 @@ export class ResendEmailAdapter {
             text: message.text,
           }),
           signal: controller.signal,
-        },
-      );
-      if (!response.ok) throw new Error(`Resend HTTP ${response.status}`);
-      const result = (await response.json()) as { id?: string };
-      if (!result.id) throw new Error("Resend response invalid");
-      return { id: result.id };
-    } finally {
-      clearTimeout(timer);
+        });
+        lastStatus = response.status;
+        if (response.ok) {
+          const result = (await response.json()) as { id?: unknown };
+          if (typeof result.id !== "string" || result.id.length < 1)
+            throw new EmailProviderError(
+              "Resend response invalid",
+              response.status,
+              attempt,
+            );
+          return { id: result.id };
+        }
+        const retryable = response.status === 429 || response.status >= 500;
+        if (!retryable || attempt + 1 >= maxAttempts)
+          throw new EmailProviderError(
+            `Resend HTTP ${response.status}`,
+            response.status,
+            attempt,
+          );
+        const retryAfter = Number(response.headers.get("retry-after"));
+        await this.wait(
+          Number.isFinite(retryAfter)
+            ? Math.min(Math.max(retryAfter * 1_000, 0), 2_000)
+            : Math.min(100 * 2 ** attempt, 2_000),
+        );
+      } catch (error) {
+        if (error instanceof EmailProviderError) throw error;
+        if (attempt + 1 >= maxAttempts)
+          throw new EmailProviderError(
+            "Resend transport unavailable",
+            lastStatus,
+            attempt,
+          );
+        await this.wait(Math.min(100 * 2 ** attempt, 2_000));
+      } finally {
+        clearTimeout(timer);
+      }
     }
+    throw new EmailProviderError("Resend delivery failed", lastStatus, 0);
   }
 }
 

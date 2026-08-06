@@ -17,6 +17,7 @@
     "@legacy/database": "workspace:*",
     "@legacy/documents": "workspace:*",
     "@legacy/domain": "workspace:*",
+    "@legacy/notifications": "workspace:*",
     "@legacy/reports": "workspace:*",
     "bullmq": "6.0.8",
     "ioredis": "6.0.0"

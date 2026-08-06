@@ -38,15 +38,23 @@ describe("real Valkey workflow queue", () => {
     );
     const workflowId = randomUUID();
     try {
-      const job = await enqueueWorkflow(queue, "annual-review", {
+      const data = {
         workflowId,
         organizationId: randomUUID(),
         householdId: randomUUID(),
         actorId: randomUUID(),
-      });
+      };
+      const job = await enqueueWorkflow(queue, "annual-review", data);
+      const notification = await enqueueWorkflow(
+        queue,
+        "notification-send",
+        data,
+      );
+      expect(notification.id).not.toBe(job.id);
       await queueEvents.waitUntilReady();
       await job.waitUntilFinished(queueEvents, 10_000);
-      expect(received).toHaveLength(1);
+      await notification.waitUntilFinished(queueEvents, 10_000);
+      expect(received).toHaveLength(2);
       expect(received[0]?.workflowId).toBe(workflowId);
     } finally {
       await worker.close();

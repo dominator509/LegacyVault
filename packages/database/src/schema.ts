@@ -165,6 +165,7 @@ export const reports = pgTable("reports", {
   ...tenant,
   kind: text("kind").notNull(),
   workflowId: uuid("workflow_id"),
+  requestedBy: uuid("requested_by"),
   status: text("status").notNull(),
   generatedAt: timestamp("generated_at", { withTimezone: true }).notNull(),
   completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -174,6 +175,30 @@ export const reports = pgTable("reports", {
   encryptionKeyVersion: integer("encryption_key_version"),
   ...versioned,
 });
+export const notificationDeliveries = pgTable(
+  "notification_deliveries",
+  {
+    id: uuid("id").primaryKey(),
+    ...tenant,
+    workflowId: uuid("workflow_id").notNull(),
+    recipientPersonId: uuid("recipient_person_id").notNull(),
+    kind: text("kind").notNull(),
+    status: text("status").notNull(),
+    providerMessageId: text("provider_message_id"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    lastErrorClass: text("last_error_class"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    ...versioned,
+  },
+  (table) => [
+    uniqueIndex("notification_delivery_workflow_recipient_kind_unique").on(
+      table.workflowId,
+      table.recipientPersonId,
+      table.kind,
+    ),
+  ],
+);
 export const exports = pgTable("exports", {
   id: uuid("id").primaryKey(),
   ...tenant,

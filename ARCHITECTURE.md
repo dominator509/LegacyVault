@@ -4,7 +4,7 @@
 A Next.js web application calls a Fastify modular monolith. PostgreSQL stores authoritative structured facts, consent versions, access control, and audit metadata. R2 stores client-side or server-side envelope-encrypted objects. BullMQ workers perform OCR, classification, report generation, deletion, notifications, and annual reviews. One AI Policy Gateway is the only code allowed to call DeepSeek.
 
 ## Repository map
-`apps/web`, `apps/api`, `apps/worker`, `apps/report-renderer`, `packages/domain`, `packages/database`, `packages/auth`, `packages/crypto`, `packages/ai-gateway`, `packages/documents`, `packages/reports`, `packages/audit`, `packages/contracts`, `packages/ui`, `compliance`, `infra`, and `tests`.
+`apps/web`, `apps/api`, `apps/worker`, `apps/report-renderer`, `packages/domain`, `packages/database`, `packages/auth`, `packages/crypto`, `packages/ai-gateway`, `packages/documents`, `packages/reports`, `packages/notifications`, `packages/audit`, `packages/contracts`, `packages/ui`, `compliance`, `infra`, and `tests`.
 
 ## Code import law
 1. `packages/domain` imports no application, database, framework, network, or vendor package.

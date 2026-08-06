@@ -16,6 +16,7 @@ import {
   type PrivacyDeletionInput,
   type PrivacyDeletionProgress,
   type ReportBuildInput,
+  type NotificationDeliveryInput,
   type TenantContext,
 } from "@legacy/database/repository";
 import {
@@ -45,6 +46,11 @@ import {
   aiExactCacheNamespace,
   RedisExactCache,
 } from "@legacy/ai-gateway";
+import {
+  LocalSmtpCaptureAdapter,
+  ResendEmailAdapter,
+  type EmailMessage,
+} from "@legacy/notifications";
 
 export type WorkflowJobName =
   | "document-process"
@@ -119,6 +125,27 @@ export interface ReportGenerationRepository {
       encryptionKeyVersion: number;
     },
   ): Promise<void>;
+}
+export interface NotificationDeliveryRepository {
+  getNotificationDeliveryInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<NotificationDeliveryInput | null>;
+  completeNotificationDelivery(
+    context: TenantContext,
+    input: {
+      deliveryId: string;
+      providerMessageId: string;
+      sentAt: string;
+    },
+  ): Promise<void>;
+  recordNotificationDeliveryFailure(
+    context: TenantContext,
+    input: { deliveryId: string; errorClass: string },
+  ): Promise<void>;
+}
+export interface NotificationEmailSender {
+  send(message: EmailMessage): Promise<{ id: string }>;
 }
 
 export interface DocumentProcessingRepository {
@@ -333,6 +360,7 @@ export function createPrivacyDeletionWorkflowHandler(input: {
 export function createReportGenerationWorkflowHandler(input: {
   repository: ReportGenerationRepository;
   householdKeyStore: PostgresHouseholdKeyStore;
+  enqueueNotification: (data: WorkflowJobData) => Promise<void>;
   now?: () => Date;
 }): WorkflowHandler {
   return async (data) => {
@@ -345,7 +373,10 @@ export function createReportGenerationWorkflowHandler(input: {
       context,
       data.workflowId,
     );
-    if (build.status === "completed") return;
+    if (build.status === "completed") {
+      if (build.kind === "annual-review") await input.enqueueNotification(data);
+      return;
+    }
     const householdKey =
       await input.householdKeyStore.getOrCreateActiveKey(context);
     const openedValues: Uint8Array[] = [];
@@ -477,11 +508,57 @@ export function createReportGenerationWorkflowHandler(input: {
         payloadEncrypted: encryptedPayload,
         encryptionKeyVersion: householdKey.keyVersion,
       });
+      if (build.kind === "annual-review") await input.enqueueNotification(data);
     } finally {
       for (const opened of openedValues) opened.fill(0);
       serialized?.fill(0);
       encryptedPayload?.fill(0);
       householdKey.plaintextKey.fill(0);
+    }
+  };
+}
+
+export function createNotificationWorkflowHandler(input: {
+  repository: NotificationDeliveryRepository;
+  email: NotificationEmailSender;
+  appBaseUrl: string;
+  now?: () => Date;
+}): WorkflowHandler {
+  const baseUrl = new URL(input.appBaseUrl);
+  return async (data) => {
+    const context = {
+      organizationId: data.organizationId,
+      householdId: data.householdId,
+      actorId: data.actorId,
+    };
+    const delivery = await input.repository.getNotificationDeliveryInput(
+      context,
+      data.workflowId,
+    );
+    if (!delivery || delivery.status === "sent") return;
+    const reportUrl = new URL(
+      `/reports/${delivery.reportId}`,
+      baseUrl,
+    ).toString();
+    try {
+      const sent = await input.email.send({
+        to: delivery.recipientEmail,
+        subject: "Your Legacy Vault annual review is ready",
+        text: `Your annual review is ready. Sign in to review it: ${reportUrl}`,
+        html: `<p>Your annual review is ready.</p><p><a href="${reportUrl}">Sign in to review it</a></p>`,
+        idempotencyKey: delivery.deliveryId,
+      });
+      await input.repository.completeNotificationDelivery(context, {
+        deliveryId: delivery.deliveryId,
+        providerMessageId: sent.id,
+        sentAt: (input.now?.() ?? new Date()).toISOString(),
+      });
+    } catch (error) {
+      await input.repository.recordNotificationDeliveryFailure(context, {
+        deliveryId: delivery.deliveryId,
+        errorClass: error instanceof Error ? error.name : "UnknownError",
+      });
+      throw error;
     }
   };
 }
@@ -800,7 +877,13 @@ export function enqueueWorkflow(
   data: WorkflowJobData,
   options: JobsOptions = {},
 ) {
-  return queue.add(name, data, { ...options, jobId: data.workflowId });
+  return queue.add(name, data, {
+    ...options,
+    jobId:
+      name === "notification-send"
+        ? `${data.workflowId}-notification-send`
+        : data.workflowId,
+  });
 }
 
 export function createWorkflowWorker(
@@ -839,6 +922,8 @@ async function main(): Promise<void> {
     !environment.REDIS_URL ||
     !environment.APP_ENCRYPTION_KEK ||
     !environment.EXPORT_SIGNING_KEY ||
+    !environment.APP_BASE_URL ||
+    !environment.EMAIL_FROM ||
     !environment.R2_ACCESS_KEY_ID ||
     !environment.R2_SECRET_ACCESS_KEY ||
     !environment.R2_BUCKET ||
@@ -914,6 +999,10 @@ async function main(): Promise<void> {
     ),
     environment.NODE_ENV === "production",
   );
+  const notificationQueue = createWorkflowQueue(
+    environment.REDIS_URL,
+    environment.WORKFLOW_QUEUE_NAME,
+  );
   const privacyDelete = createPrivacyDeletionWorkflowHandler({
     repository,
     purgeAiCache: (scopeKey) => aiExactCache.purgeScope(scopeKey),
@@ -922,6 +1011,31 @@ async function main(): Promise<void> {
   const reportGenerate = createReportGenerationWorkflowHandler({
     repository,
     householdKeyStore,
+    enqueueNotification: async (data) => {
+      await enqueueWorkflow(notificationQueue, "notification-send", data);
+    },
+  });
+  const email = environment.LOCAL_ENGINEERING_MODE
+    ? new LocalSmtpCaptureAdapter({
+        host: "127.0.0.1",
+        port: 1025,
+        from:
+          /<([^>]+)>/u.exec(environment.EMAIL_FROM ?? "")?.[1] ??
+          environment.EMAIL_FROM ??
+          "notices@localhost.invalid",
+        timeoutMs: 5_000,
+      })
+    : new ResendEmailAdapter({
+        ...(environment.RESEND_API_KEY
+          ? { apiKey: environment.RESEND_API_KEY }
+          : {}),
+        from: environment.EMAIL_FROM ?? "",
+        timeoutMs: 10_000,
+      });
+  const notificationSend = createNotificationWorkflowHandler({
+    repository,
+    email,
+    appBaseUrl: environment.APP_BASE_URL ?? "",
   });
   const worker = createWorkflowWorker(
     environment.REDIS_URL,
@@ -940,6 +1054,7 @@ async function main(): Promise<void> {
       "privacy-delete": privacyDelete,
       "report-generate": reportGenerate,
       "annual-review": reportGenerate,
+      "notification-send": notificationSend,
     },
     environment.WORKFLOW_QUEUE_NAME,
   );
@@ -949,6 +1064,7 @@ async function main(): Promise<void> {
       repository.close(),
       householdKeyStore.close(),
       aiExactCache.close(),
+      notificationQueue.close(),
     ]);
     applicationKek.fill(0);
   };
@@ -965,6 +1081,7 @@ async function main(): Promise<void> {
         "privacy-delete",
         "privacy-export",
         "report-generate",
+        "notification-send",
       ],
     }) + "\n",
   );

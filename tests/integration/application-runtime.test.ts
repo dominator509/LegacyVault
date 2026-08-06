@@ -295,6 +295,7 @@ describe("composed application runtime", () => {
         const generate = createReportGenerationWorkflowHandler({
           repository: runtime.dependencies.repository,
           householdKeyStore: reportKeyStore,
+          enqueueNotification: async () => undefined,
           now: () => new Date("2026-08-06T00:00:00.000Z"),
         });
         await generate({

@@ -59,6 +59,9 @@ importers:
       '@legacy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@legacy/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@legacy/reports':
         specifier: workspace:*
         version: link:../../packages/reports
@@ -124,6 +127,9 @@ importers:
       '@legacy/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@legacy/notifications':
+        specifier: workspace:*
+        version: link:../../packages/notifications
       '@legacy/reports':
         specifier: workspace:*
         version: link:../../packages/reports
@@ -257,6 +263,12 @@ importers:
         version: 7.0.2
 
   packages/domain:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  packages/notifications:
     devDependencies:
       typescript:
         specifier: 7.0.2

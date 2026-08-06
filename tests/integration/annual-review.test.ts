@@ -130,9 +130,13 @@ describe("queued encrypted annual review", () => {
       kind: "annual-review",
       requestedAt: "2026-08-06T00:00:00.000Z",
     });
+    const notificationJobs: { workflowId: string }[] = [];
     const handler = createReportGenerationWorkflowHandler({
       repository,
       householdKeyStore: keyStore,
+      enqueueNotification: async (data) => {
+        notificationJobs.push(data);
+      },
       now: () => new Date("2026-08-06T00:00:00.000Z"),
     });
     await handler({
@@ -143,6 +147,10 @@ describe("queued encrypted annual review", () => {
       workflowId: started.workflow.id,
       ...context,
     });
+    expect(notificationJobs).toEqual([
+      expect.objectContaining({ workflowId: started.workflow.id }),
+      expect.objectContaining({ workflowId: started.workflow.id }),
+    ]);
 
     const readClient = createDatabaseClient(databaseUrl);
     await readClient.connect();

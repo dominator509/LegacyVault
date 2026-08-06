@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { LocalSmtpCaptureAdapter } from "../../apps/api/src/adapters/email.js";
+import { LocalSmtpCaptureAdapter } from "../../packages/notifications/src/index.js";
 
 interface MailpitSummary {
   ID: string;
