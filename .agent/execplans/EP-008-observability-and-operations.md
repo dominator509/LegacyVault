@@ -70,7 +70,8 @@ Re-enter from the first unchecked milestone after verifying the previous checkpo
 - Empty optional telemetry values from the authorized local `.env` require normalization to `undefined` at the typed environment boundary.
 
 # 13. Decision Log
-- None recorded.
+- ADR-073 centralizes content-free telemetry and optional official OpenTelemetry/Sentry export behind a fail-closed schema.
+- ADR-074 confines the real restore drill to a checksummed local backup and a validated ephemeral Compose database.
 
 # 14. Outcomes & Retrospective
 - Complete only after NODE_DONE.

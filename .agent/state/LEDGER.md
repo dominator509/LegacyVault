@@ -430,3 +430,9 @@
 2026-08-06T13:01:47Z | codex | EP-008 | HYPOTHESIS | locate_and_use_the_manifested_EP-008_observability-and-operations_filename
 2026-08-06T13:03:28Z | codex | EP-008 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
 2026-08-06T13:03:28Z | codex | EP-008 | HEARTBEAT | content_free_telemetry_API_AI_instrumentation_alerts_runbooks_and_local_backup_restore_drill_implemented
+2026-08-06T13:09:27Z | codex | EP-008 | SIG | guessed_root_CONTROL_TRACEABILITY_path_exit_1
+2026-08-06T13:09:27Z | codex | EP-008 | HYPOTHESIS | use_the_manifested_compliance_CONTROL_TRACEABILITY_path
+2026-08-06T13:11:13Z | codex | EP-008 | SIG | exact_verify_and_production_readiness_exit_1_missing_STRIPE_SECRET_KEY_EXT005
+2026-08-06T13:11:13Z | codex | EP-008 | EXTERNAL_DEFERRED | M2_verify_sentinel_and_green_tag_blocked_by_authenticated_Stripe_sandbox_evidence
+2026-08-06T13:11:13Z | codex | EP-008 | CONTINUATION_PASS | unit_56_integration_72_e2e_6_contract_39_operations_1727_cases_build_security_audit_smoke_live_fire_backup_restore_and_format_ok
+2026-08-06T13:11:13Z | codex | EP-008 | HEARTBEAT | DeepSeek_live_fire_2_tests_and_k6_50VUs_250_iterations_zero_failures_p95_211.78ms_ok
