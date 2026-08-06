@@ -143,6 +143,10 @@ export async function registerVaultRoutes(
       kind: ReportKind,
       idempotencyKey: string,
     ) => Promise<unknown>;
+    getReport?: (
+      identity: AuthenticatedTenantIdentity,
+      reportId: string,
+    ) => Promise<unknown | null>;
     createCheckout?: (
       identity: AuthenticatedTenantIdentity,
       idempotencyKey: string,
@@ -1003,6 +1007,31 @@ export async function registerVaultRoutes(
       exportKey.fill(0);
     }
   });
+
+  server.get<{ Params: { id: string } }>(
+    "/v1/reports/:id",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!uuidPattern.test(request.params.id))
+        throw new ApiProblem(400, "Invalid request", "report id is invalid");
+      if (!dependencies.getReport)
+        throw new ApiProblem(
+          503,
+          "Report unavailable",
+          "Report retrieval is not configured.",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "read",
+          purpose: "vault.report.read",
+        });
+      const report = await dependencies.getReport(identity, request.params.id);
+      if (!report)
+        throw new ApiProblem(404, "Report not found", "Report not found.");
+      return reply.header("cache-control", "no-store").send(report);
+    },
+  );
 
   server.post("/v1/reports", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);

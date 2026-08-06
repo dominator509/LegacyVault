@@ -193,3 +193,6 @@
 2026-08-06T01:23:01Z | codex | EP-004 | SIG | focused_annual_review_expected_random_fixture_creation_order_while_repository_deliberately_orders_facts_by_field_and_id
 2026-08-06T01:23:01Z | codex | EP-004 | HYPOTHESIS | compare_expected_finding_ids_in_the_same_deterministic_field_and_id_order_without_weakening_payload_assertions
 2026-08-06T01:23:01Z | codex | EP-004 | HEARTBEAT | queued_envelope_encrypted_reports_deterministic_annual_review_stale_contradiction_missing_and_document_expiry_findings_real_expiration_API_and_PostgreSQL_path_worker_ready_annual_review_document_process_privacy_delete_privacy_export_report_generate_unit_37_integration_46_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
+2026-08-06T01:34:39Z | codex | EP-004 | SIG | format_check_exit_1_annual_review_tenant_isolation_assertion_style_only_type_integration_47_security_ok_before_assertion
+2026-08-06T01:34:39Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_integration_and_security_gates
+2026-08-06T01:34:39Z | codex | EP-004 | HEARTBEAT | authorized_no_store_report_retrieval_pending_metadata_only_completed_payload_decrypt_binding_and_RLS_cross_tenant_null_format_type_integration_47_security_ok

@@ -54,6 +54,10 @@ export interface ServerDependencies {
     kind: ReportKind,
     idempotencyKey: string,
   ) => Promise<unknown>;
+  getReport?: (
+    identity: AuthenticatedTenantIdentity,
+    reportId: string,
+  ) => Promise<unknown | null>;
   createCheckout?: (
     identity: AuthenticatedTenantIdentity,
     idempotencyKey: string,
@@ -131,6 +135,7 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.cancelPrivacyDeletion ||
       !dependencies.encryptFactValue ||
       !dependencies.createReport ||
+      !dependencies.getReport ||
       !dependencies.createCheckout ||
       !dependencies.startDocumentUpload ||
       !dependencies.createDocumentUploadUrl ||

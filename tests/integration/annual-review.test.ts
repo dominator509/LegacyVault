@@ -173,6 +173,24 @@ describe("queued encrypted annual review", () => {
       await readClient.end();
     }
 
+    expect(
+      await repository.getReport(context, started.report.id),
+    ).toMatchObject({
+      id: started.report.id,
+      kind: "annual-review",
+      status: "completed",
+    });
+    await expect(
+      repository.getReport(
+        {
+          organizationId: randomUUID(),
+          householdId: randomUUID(),
+          actorId: randomUUID(),
+        },
+        started.report.id,
+      ),
+    ).resolves.toBeNull();
+
     const openKey = await keyStore.getOrCreateActiveKey(context);
     let opened: Uint8Array | undefined;
     try {

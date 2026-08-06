@@ -25,7 +25,9 @@ import {
 import { createWorkflowQueue, enqueueWorkflow } from "@legacy/worker";
 import {
   allRecordCategories,
+  assertReportProvenance,
   recordCategoryFromFieldKey,
+  type Report,
 } from "@legacy/domain";
 import { DocumentObjectStore } from "@legacy/documents";
 import {
@@ -328,6 +330,54 @@ export function createApplicationRuntime(environment: Environment): {
           },
         );
         return started;
+      },
+      getReport: async (identity, reportId) => {
+        const record = await repository.getReport(identity, reportId);
+        if (!record) return null;
+        if (record.status !== "completed")
+          return {
+            id: record.id,
+            kind: record.kind,
+            status: record.status,
+            generatedAt: record.generatedAt,
+            version: record.version,
+          };
+        if (!record.payloadEncrypted || !record.encryptionKeyVersion)
+          throw new Error("completed report payload is unavailable");
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        let opened: Uint8Array | undefined;
+        try {
+          opened = decryptEnvelope(
+            JSON.parse(
+              Buffer.from(record.payloadEncrypted).toString("utf8"),
+            ) as EncryptedEnvelope,
+            householdKey.plaintextKey,
+            {
+              organizationId: identity.organizationId,
+              householdId: identity.householdId,
+              recordId: record.id,
+              purpose: `report-payload:${record.kind}`,
+              keyVersion: record.encryptionKeyVersion,
+            },
+          );
+          const report = JSON.parse(
+            Buffer.from(opened).toString("utf8"),
+          ) as Report;
+          if (
+            report.id !== record.id ||
+            report.organizationId !== identity.organizationId ||
+            report.householdId !== identity.householdId ||
+            report.kind !== record.kind
+          )
+            throw new Error("report payload binding mismatch");
+          assertReportProvenance(report);
+          return report;
+        } finally {
+          opened?.fill(0);
+          record.payloadEncrypted.fill(0);
+          householdKey.plaintextKey.fill(0);
+        }
       },
       createCheckout: (identity, idempotencyKey) =>
         stripe.createCheckout({

@@ -89,6 +89,15 @@ export interface ReportBuildInput {
   facts: EncryptedFactForReport[];
   documents: readonly { id: string; expiresAt?: string }[];
 }
+export interface EncryptedReportRecord {
+  id: string;
+  kind: ReportKind;
+  status: "pending" | "completed" | "failed";
+  generatedAt: string;
+  payloadEncrypted?: Uint8Array;
+  encryptionKeyVersion?: number;
+  version: number;
+}
 export interface DocumentUploadRecord {
   id: string;
   objectKey: string;
@@ -373,6 +382,41 @@ export class VaultRepository {
             ? { expiresAt: document.expires_at.toISOString() }
             : {}),
         })),
+      };
+    });
+  }
+
+  async getReport(
+    context: TenantContext,
+    reportId: string,
+  ): Promise<EncryptedReportRecord | null> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        kind: ReportKind;
+        status: EncryptedReportRecord["status"];
+        generated_at: Date;
+        payload_encrypted: Buffer | null;
+        encryption_key_version: number | null;
+        version: number;
+      }>(
+        "select id,kind,status,generated_at,payload_encrypted,encryption_key_version,version from reports where id=$1",
+        [reportId],
+      );
+      const row = result.rows[0];
+      if (!row) return null;
+      return {
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        generatedAt: row.generated_at.toISOString(),
+        ...(row.payload_encrypted
+          ? { payloadEncrypted: new Uint8Array(row.payload_encrypted) }
+          : {}),
+        ...(row.encryption_key_version === null
+          ? {}
+          : { encryptionKeyVersion: row.encryption_key_version }),
+        version: row.version,
       };
     });
   }

@@ -357,6 +357,11 @@ describe("composed application runtime", () => {
           evidenceIds: [evidenceId],
         }),
       ]);
+      const retrievedReport = await runtime.dependencies.getReport?.(
+        identity,
+        reportStart.report.id,
+      );
+      expect(retrievedReport).toEqual(openedReport);
 
       const documentPlaintext = Buffer.from(
         "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAALklEQVR4nO3OMQEAAAjDsIF/z0MGT2qgmbb5bF/vAAAAAAAAAAAAAAAAAAAASQ5AtAM9yMAItAAAAABJRU5ErkJggg==",

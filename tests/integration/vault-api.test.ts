@@ -31,6 +31,7 @@ let observedExportKey: Uint8Array | undefined;
 let observedManualExtraction: unknown;
 let observedAiInterview: unknown;
 let observedDocumentUpload: unknown;
+let observedReportId: string | undefined;
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
@@ -64,6 +65,19 @@ const server = buildServer({
     report: { id: randomUUID(), kind, status: "pending", version: 1 },
     workflow: { id: randomUUID(), status: "pending", version: 1 },
   }),
+  getReport: async (_resolved, reportId) => {
+    observedReportId = reportId;
+    return {
+      id: reportId,
+      organizationId: identity.organizationId,
+      householdId: identity.householdId,
+      kind: "family-emergency-guide",
+      generatedAt: "2026-08-06T00:00:00.000Z",
+      claims: [],
+      sourceFactVersions: {},
+      version: 1,
+    };
+  },
   createCheckout: async () => ({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
@@ -488,6 +502,32 @@ describe("vault API persistence", () => {
         (scope) => scope.purpose === "vault.report.create",
       ),
     ).toHaveLength(26);
+  });
+
+  it("authorizes report retrieval and prevents response caching", async () => {
+    const reportId = randomUUID();
+    const retrieved = await server.inject({
+      method: "GET",
+      url: `/v1/reports/${reportId}`,
+    });
+    expect(retrieved.statusCode).toBe(200);
+    expect(retrieved.headers["cache-control"]).toBe("no-store");
+    expect(retrieved.json()).toMatchObject({
+      id: reportId,
+      kind: "family-emergency-guide",
+    });
+    expect(observedReportId).toBe(reportId);
+    expect(
+      authorizationScopes.filter(
+        (scope) => scope.purpose === "vault.report.read",
+      ),
+    ).toHaveLength(13);
+
+    const invalid = await server.inject({
+      method: "GET",
+      url: "/v1/reports/not-a-uuid",
+    });
+    expect(invalid.statusCode).toBe(400);
   });
 
   it("normalizes document expiration timestamps and rejects missing timezones", async () => {
