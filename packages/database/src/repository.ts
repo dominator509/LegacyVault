@@ -76,6 +76,15 @@ export interface EncryptedFactForReport {
   lastReviewedAt?: string;
   version: number;
 }
+export interface VaultDocumentSummary {
+  id: string;
+  mediaType: string;
+  status: string;
+  expiresAt?: string;
+  uploadedAt?: string;
+  processedAt?: string;
+  version: number;
+}
 export interface StartedReport {
   report: { id: string; kind: ReportKind; status: "pending"; version: number };
   workflow: { id: string; status: "pending"; version: number };
@@ -262,6 +271,88 @@ export class VaultRepository {
       const row = result.rows[0];
       if (!row) throw new Error("fact unavailable");
       return row.field_key;
+    });
+  }
+
+  async listVaultFacts(
+    context: TenantContext,
+    categories: readonly string[],
+  ): Promise<EncryptedFactForReport[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        field_key: string;
+        typed_value_encrypted: Buffer;
+        key_version: number;
+        status: EncryptedFactForReport["status"];
+        source_type: string;
+        source_id: string;
+        evidence_ids: string[];
+        confidence: string | null;
+        sensitivity: string;
+        confirmed_by: string | null;
+        confirmed_at: Date | null;
+        last_reviewed_at: Date | null;
+        version: number;
+      }>(
+        "select id,field_key,typed_value_encrypted,key_version,status,source_type,source_id,evidence_ids,confidence,sensitivity,confirmed_by,confirmed_at,last_reviewed_at,version from facts where status<>'rejected' and split_part(field_key,'.',1)=any($1::text[]) order by field_key,id",
+        [categories],
+      );
+      return result.rows.map((fact) => ({
+        id: fact.id,
+        fieldKey: fact.field_key,
+        ciphertext: new Uint8Array(fact.typed_value_encrypted),
+        keyVersion: fact.key_version,
+        status: fact.status,
+        sourceType: fact.source_type,
+        sourceId: fact.source_id,
+        evidenceIds: fact.evidence_ids,
+        ...(fact.confidence === null
+          ? {}
+          : { confidence: Number(fact.confidence) }),
+        sensitivity: fact.sensitivity,
+        ...(fact.confirmed_by ? { confirmedBy: fact.confirmed_by } : {}),
+        ...(fact.confirmed_at
+          ? { confirmedAt: fact.confirmed_at.toISOString() }
+          : {}),
+        ...(fact.last_reviewed_at
+          ? { lastReviewedAt: fact.last_reviewed_at.toISOString() }
+          : {}),
+        version: fact.version,
+      }));
+    });
+  }
+
+  async listVaultDocuments(
+    context: TenantContext,
+  ): Promise<VaultDocumentSummary[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        media_type: string;
+        status: string;
+        expires_at: Date | null;
+        uploaded_at: Date | null;
+        processed_at: Date | null;
+        version: number;
+      }>(
+        "select id,media_type,status,expires_at,uploaded_at,processed_at,version from documents where status<>'deleted' order by uploaded_at desc nulls last,id",
+      );
+      return result.rows.map((document) => ({
+        id: document.id,
+        mediaType: document.media_type,
+        status: document.status,
+        ...(document.expires_at
+          ? { expiresAt: document.expires_at.toISOString() }
+          : {}),
+        ...(document.uploaded_at
+          ? { uploadedAt: document.uploaded_at.toISOString() }
+          : {}),
+        ...(document.processed_at
+          ? { processedAt: document.processed_at.toISOString() }
+          : {}),
+        version: document.version,
+      }));
     });
   }
 

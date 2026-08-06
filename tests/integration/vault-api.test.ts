@@ -32,6 +32,7 @@ let observedManualExtraction: unknown;
 let observedAiInterview: unknown;
 let observedDocumentUpload: unknown;
 let observedReportId: string | undefined;
+let observedFactCategories: readonly string[] = [];
 const server = buildServer({
   repository,
   resolveIdentity: async () => identity,
@@ -78,6 +79,26 @@ const server = buildServer({
       version: 1,
     };
   },
+  listVaultFacts: async (_resolved, categories) => {
+    observedFactCategories = categories;
+    return [
+      {
+        id: randomUUID(),
+        fieldKey: "insurance.carrier",
+        value: "Example Mutual",
+        status: "confirmed",
+        version: 1,
+      },
+    ];
+  },
+  listVaultDocuments: async () => [
+    {
+      id: randomUUID(),
+      mediaType: "application/pdf",
+      status: "clean",
+      version: 2,
+    },
+  ],
   createCheckout: async () => ({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
@@ -166,6 +187,27 @@ afterAll(async () => {
 });
 
 describe("vault API persistence", () => {
+  it("returns no-store category-scoped facts and secret-free document metadata", async () => {
+    const facts = await server.inject({
+      method: "GET",
+      url: "/v1/facts?category=insurance",
+    });
+    expect(facts.statusCode).toBe(200);
+    expect(facts.headers["cache-control"]).toBe("no-store");
+    expect(observedFactCategories).toEqual(["insurance"]);
+    expect(facts.json()).toMatchObject({
+      facts: [{ fieldKey: "insurance.carrier", value: "Example Mutual" }],
+    });
+    const documents = await server.inject({
+      method: "GET",
+      url: "/v1/documents",
+    });
+    expect(documents.statusCode).toBe(200);
+    expect(documents.headers["cache-control"]).toBe("no-store");
+    expect(documents.body).not.toContain("objectKey");
+    expect(documents.body).not.toContain("wrapped");
+  });
+
   it("creates and replays an encrypted candidate fact then confirms it optimistically", async () => {
     const key = `create-${randomUUID()}`;
     const payload = {

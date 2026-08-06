@@ -343,6 +343,59 @@ export function createApplicationRuntime(environment: Environment): {
           key.plaintextKey.fill(0);
         }
       },
+      listVaultFacts: async (identity, categories) => {
+        const encryptedFacts = await repository.listVaultFacts(
+          identity,
+          categories,
+        );
+        const householdKey =
+          await householdKeyStore.getOrCreateActiveKey(identity);
+        try {
+          return encryptedFacts.map((fact) => {
+            let opened: Uint8Array | undefined;
+            try {
+              opened = decryptEnvelope(
+                storedEnvelope(
+                  JSON.parse(Buffer.from(fact.ciphertext).toString("utf8")),
+                ),
+                householdKey.plaintextKey,
+                {
+                  organizationId: identity.organizationId,
+                  householdId: identity.householdId,
+                  recordId: fact.id,
+                  purpose: `fact-value:${fact.fieldKey}`,
+                  keyVersion: fact.keyVersion,
+                },
+              );
+              return {
+                id: fact.id,
+                fieldKey: fact.fieldKey,
+                value: JSON.parse(Buffer.from(opened).toString("utf8")),
+                status: fact.status,
+                sourceType: fact.sourceType,
+                sourceId: fact.sourceId,
+                evidenceIds: fact.evidenceIds,
+                ...(fact.confidence === undefined
+                  ? {}
+                  : { confidence: fact.confidence }),
+                sensitivity: fact.sensitivity,
+                ...(fact.confirmedBy ? { confirmedBy: fact.confirmedBy } : {}),
+                ...(fact.confirmedAt ? { confirmedAt: fact.confirmedAt } : {}),
+                ...(fact.lastReviewedAt
+                  ? { lastReviewedAt: fact.lastReviewedAt }
+                  : {}),
+                version: fact.version,
+              };
+            } finally {
+              opened?.fill(0);
+              fact.ciphertext.fill(0);
+            }
+          });
+        } finally {
+          householdKey.plaintextKey.fill(0);
+        }
+      },
+      listVaultDocuments: (identity) => repository.listVaultDocuments(identity),
       createReport: async (identity, kind, idempotencyKey) => {
         const started = await repository.startReport(identity, {
           idempotencyKey,

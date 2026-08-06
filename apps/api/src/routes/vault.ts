@@ -142,6 +142,13 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       plaintext: Uint8Array,
     ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+    listVaultFacts?: (
+      identity: AuthenticatedTenantIdentity,
+      categories: readonly RecordCategory[],
+    ) => Promise<readonly unknown[]>;
+    listVaultDocuments?: (
+      identity: AuthenticatedTenantIdentity,
+    ) => Promise<readonly unknown[]>;
     createReport?: (
       identity: AuthenticatedTenantIdentity,
       kind: ReportKind,
@@ -247,6 +254,39 @@ export async function registerVaultRoutes(
       traceId: request.id,
     });
   });
+
+  server.get<{ Querystring: { category?: string } }>(
+    "/v1/facts",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.listVaultFacts)
+        throw new ApiProblem(
+          503,
+          "Vault unavailable",
+          "Fact retrieval is not configured.",
+        );
+      const categories = request.query.category
+        ? [request.query.category]
+        : [...allRecordCategories];
+      if (
+        !categories.every((category) =>
+          allRecordCategories.includes(category as RecordCategory),
+        )
+      )
+        throw new ApiProblem(400, "Invalid request", "category is invalid");
+      for (const category of categories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category: category as RecordCategory,
+          action: "read",
+          purpose: "vault.fact.list",
+        });
+      const facts = await dependencies.listVaultFacts(
+        identity,
+        categories as RecordCategory[],
+      );
+      return reply.header("cache-control", "no-store").send({ facts });
+    },
+  );
 
   server.post("/v1/facts", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);
@@ -360,6 +400,24 @@ export async function registerVaultRoutes(
       created,
     );
     return reply.code(201).send(created);
+  });
+
+  server.get("/v1/documents", async (request, reply) => {
+    const identity = await dependencies.resolveIdentity(request);
+    if (!dependencies.listVaultDocuments)
+      throw new ApiProblem(
+        503,
+        "Vault unavailable",
+        "Document retrieval is not configured.",
+      );
+    for (const category of allRecordCategories)
+      await dependencies.authorizeIdentity?.(identity, {
+        category,
+        action: "read",
+        purpose: "vault.document.list",
+      });
+    const documents = await dependencies.listVaultDocuments(identity);
+    return reply.header("cache-control", "no-store").send({ documents });
   });
 
   server.post("/v1/documents", async (request, reply) => {

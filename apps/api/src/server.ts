@@ -53,6 +53,13 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     plaintext: Uint8Array,
   ) => Promise<{ id: string; ciphertext: Uint8Array; keyVersion: number }>;
+  listVaultFacts?: (
+    identity: AuthenticatedTenantIdentity,
+    categories: readonly RecordCategory[],
+  ) => Promise<readonly unknown[]>;
+  listVaultDocuments?: (
+    identity: AuthenticatedTenantIdentity,
+  ) => Promise<readonly unknown[]>;
   createReport?: (
     identity: AuthenticatedTenantIdentity,
     kind: ReportKind,
@@ -139,6 +146,8 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.cancelPrivacyDeletion ||
       !dependencies.encryptFactValue ||
       !dependencies.encryptEmergencyReason ||
+      !dependencies.listVaultFacts ||
+      !dependencies.listVaultDocuments ||
       !dependencies.createReport ||
       !dependencies.getReport ||
       !dependencies.createCheckout ||

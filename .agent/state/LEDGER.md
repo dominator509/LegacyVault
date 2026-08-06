@@ -216,3 +216,8 @@
 2026-08-06T02:42:53Z | codex | EP-004 | SIG | emergency_lifecycle_first_format_check_exit_1_route_and_repository_style_only_type_ok
 2026-08-06T02:42:53Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_execute_type_unit_real_PostgreSQL_API_RLS_and_security_gates
 2026-08-06T02:42:53Z | codex | EP-004 | HEARTBEAT | self_membership_emergency_request_DLP_encrypted_reason_owner_category_approval_deny_or_bounded_delay_optimistic_release_early_conflict_RLS_and_released_category_authorization_unit_41_integration_53_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
+2026-08-06T02:56:53Z | codex | EP-004 | SIG | application_runtime_vault_read_assertion_expected_Example_Mutual_but_persisted_encrypted_fixture_was_Runtime_Mutual
+2026-08-06T02:56:53Z | codex | EP-004 | HYPOTHESIS | align_the_exact_plaintext_assertion_with_the_actual_persisted_encrypted_fixture_while_preserving_category_binding_and_ciphertext_non_disclosure_checks
+2026-08-06T02:56:53Z | codex | EP-004 | HEARTBEAT | authorized_category_filtered_post_policy_fact_decryption_no_store_document_metadata_only_reads_no_object_wrapped_or_ciphertext_material_unit_41_integration_54_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
+2026-08-06T02:56:53Z | codex | EP-004 | SIG | requested_scoped_formatter_scripts_format_sh_exit_127_no_such_file_while_later_composite_type_integration_security_and_diff_checks_passed
+2026-08-06T02:56:53Z | codex | EP-004 | HYPOTHESIS | use_the_exact_COMMANDS_declared_prettier_write_scope_then_run_format_check_instead_of_the_nonexistent_script

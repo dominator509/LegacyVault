@@ -358,6 +358,19 @@ describe("composed application runtime", () => {
           evidenceIds: [evidenceId],
         }),
       ]);
+      const listedFacts = await runtime.dependencies.listVaultFacts?.(
+        identity,
+        ["insurance"],
+      );
+      expect(listedFacts).toEqual([
+        expect.objectContaining({
+          id: encrypted?.id,
+          fieldKey: "insurance.carrier",
+          value: { carrier: "Runtime Mutual" },
+          status: "confirmed",
+        }),
+      ]);
+      expect(JSON.stringify(listedFacts)).not.toContain("ciphertext");
       const retrievedReport = await runtime.dependencies.getReport?.(
         identity,
         reportStart.report.id,
@@ -621,6 +634,17 @@ describe("composed application runtime", () => {
           status: "completed",
           candidates: [{ status: "candidate", version: 1 }],
         });
+        const listedDocuments =
+          await runtime.dependencies.listVaultDocuments?.(identity);
+        expect(listedDocuments).toEqual([
+          expect.objectContaining({
+            id: documentUpload?.document.id,
+            mediaType: "image/png",
+            status: "clean",
+            expiresAt: documentExpiresAt,
+          }),
+        ]);
+        expect(JSON.stringify(listedDocuments)).not.toContain("objectKey");
         await client.query("begin");
         await client.query(
           "select set_config('app.organization_id',$1,true),set_config('app.household_id',$2,true)",
