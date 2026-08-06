@@ -46,9 +46,10 @@ export function PrivacyRights() {
     setBusy(true);
     setError("");
     setSuccess("");
+    const form = e.currentTarget;
     try {
       const personId = await currentPersonId();
-      const data = new FormData(e.currentTarget);
+      const data = new FormData(form);
       const result = await apiRequest<{ privacyRequest: PrivacyRequest }>(
         "/v1/privacy-requests",
         {
