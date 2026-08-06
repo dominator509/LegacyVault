@@ -30,4 +30,5 @@ This register preserves fail-closed production gates while allowing independent 
 - EP-000 remains open and externally unverified because `scripts/preflight.sh` requires the external items above.
 - EP-000 M1 also has a bootstrap-order conflict: `scripts/install.sh`, `scripts/lint.sh`, and `scripts/typecheck.sh` require `package.json`, while the graph assigns creation of `package.json` to EP-001.
 - Explicit operator instruction dated 2026-08-05 authorizes independent implementation continuation without claiming EP-000 completion, weakening the final ship gate, or fabricating credentials or evidence.
+- EP-004 engineering and every locally possible declared gate pass at commit `4461434`, but the exact node verifier remains externally unverified because preflight exits `1` on missing EXT-005 `STRIPE_SECRET_KEY`. No `green/EP-004` tag or `NODE_DONE` event exists. ADR-063 permits only logically independent EP-005 client work against the verified local API contract.
 - Normal graph completion resumes with `sh scripts/preflight.sh`, then `sh scripts/graph-next.sh`, after required external items are supplied.

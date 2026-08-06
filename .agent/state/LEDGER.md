@@ -305,3 +305,10 @@
 2026-08-06T08:31:07Z | codex | EP-004 | HYPOTHESIS | locate_actual_DECISIONS_and_CONTROL_TRACEABILITY_files_from_the_repository_inventory
 2026-08-06T08:31:07Z | codex | EP-004 | HEARTBEAT | owner_authorized_unused_invitation_revocation_non_owner_bounded_role_change_repository_defense_optimistic_versions_idempotent_replay_revoked_token_denial_focused_real_database_vault_API_25_type_ok
 2026-08-06T08:36:17Z | codex | EP-004 | HEARTBEAT | member_administration_checkpoint_unit_45_integration_69_e2e_3_contract_38_operations_1710_cases_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok_scope_diff_8_expected_files_clean
+2026-08-06T08:41:23Z | codex | EP-004 | SIG | direct_rtk_type_ExecPlan_read_exit_1_program_not_found
+2026-08-06T08:41:23Z | codex | EP-004 | HYPOTHESIS | use_the_verified_rtk_proxy_cmd_type_bridge_for_Windows_builtin_file_reads
+2026-08-06T08:41:23Z | codex | EP-004 | SIG | continuation_search_exit_1_from_Windows_literal_root_wildcard_while_returning_the_existing_ADR009_and_DEFERRED_EXTERNALS_evidence
+2026-08-06T08:41:23Z | codex | EP-004 | HYPOTHESIS | inspect_the_known_continuation_files_directly_without_Windows_root_globs
+2026-08-06T08:41:23Z | codex | EP-004 | EXTERNAL_DEFERRED | verify_exit_1_preflight_missing_STRIPE_SECRET_KEY_EXT005_after_all_independent_EP004_gates_passed
+2026-08-06T08:41:23Z | codex | EP-004 | CONTINUATION_PASS | commit_4461434_unit_45_integration_69_e2e_3_contract_1710_live_fire_2_build_security_audit_smoke_ok_no_green_tag
+2026-08-06T08:41:23Z | codex | EP-004 | LEASE_RELEASE | implementation_continuation_authorized_ADR009_ADR063_node_not_done
