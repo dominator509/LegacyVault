@@ -23,7 +23,13 @@ export class AiPolicyError extends Error {
   }
 }
 export interface GatewayMetric {
-  outcome: "success" | "policy-blocked" | "provider-error" | "schema-error";
+  outcome:
+    | "success"
+    | "policy-blocked"
+    | "provider-error"
+    | "schema-error"
+    | "application-cache-hit"
+    | "application-cache-miss";
   taskFamily: string;
   promptVersion: string;
   model: string;
@@ -58,21 +64,53 @@ export class AiPolicyGateway {
   cacheKey(
     request: Pick<
       GatewayRequest<unknown>,
-      "organizationId" | "householdId" | "envelope"
-    >,
+      | "organizationId"
+      | "householdId"
+      | "purpose"
+      | "envelope"
+      | "mode"
+      | "model"
+      | "maxOutputTokens"
+    > & { consentVersion: number },
   ): string {
     return createHash("sha256")
       .update(
         stableStringify({
           organizationId: request.organizationId,
           householdId: request.householdId,
-          promptFamily: request.envelope.promptFamily,
-          promptVersion: request.envelope.promptVersion,
-          safeHouseholdCapsule: request.envelope.safeHouseholdCapsule,
-          content: request.envelope.content,
+          purpose: request.purpose,
+          consentVersion: request.consentVersion,
+          envelope: request.envelope,
+          mode: request.mode,
+          model: request.model,
+          maxOutputTokens: request.maxOutputTokens,
         }),
       )
       .digest("hex");
+  }
+  recordApplicationCache(
+    request: Pick<GatewayRequest<unknown>, "envelope" | "model" | "mode">,
+    hit: boolean,
+    latencyMs: number,
+  ): void {
+    this.emitMetric({
+      outcome: hit ? "application-cache-hit" : "application-cache-miss",
+      taskFamily: request.envelope.promptFamily,
+      promptVersion: request.envelope.promptVersion,
+      model: request.model,
+      mode: request.mode,
+      usage: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+      },
+      latencyMs,
+      dlpFindingsCount: 0,
+      schemaSuccess: hit,
+      retryCount: 0,
+      estimatedCostUsd: 0,
+    });
   }
   async execute<T>(request: GatewayRequest<T>): Promise<T> {
     if (request.purpose !== request.envelope.promptFamily)

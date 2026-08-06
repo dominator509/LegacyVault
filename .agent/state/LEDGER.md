@@ -196,3 +196,10 @@
 2026-08-06T01:34:39Z | codex | EP-004 | SIG | format_check_exit_1_annual_review_tenant_isolation_assertion_style_only_type_integration_47_security_ok_before_assertion
 2026-08-06T01:34:39Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_integration_and_security_gates
 2026-08-06T01:34:39Z | codex | EP-004 | HEARTBEAT | authorized_no_store_report_retrieval_pending_metadata_only_completed_payload_decrypt_binding_and_RLS_cross_tenant_null_format_type_integration_47_security_ok
+2026-08-06T01:50:05Z | codex | EP-004 | SIG | first_AI_Redis_cache_sweep_format_cache_file_style_and_type_TS18048_parsed_possible_undefined_while_unit_37_integration_49_security_audit_install_ok
+2026-08-06T01:50:05Z | codex | EP-004 | HYPOTHESIS | add_explicit_post_provider_response_availability_guard_and_run_authorized_formatter_before_rerunning_narrow_gates
+2026-08-06T01:50:05Z | codex | EP-004 | SIG | encrypted_cache_live_fire_typecheck_TS2307_root_test_missing_direct_ioredis_dependency_and_suite_import_failed_before_test
+2026-08-06T01:50:05Z | codex | EP-004 | HYPOTHESIS | declare_same_reviewed_pinned_ioredis_version_as_direct_root_test_dependency_refresh_lock_then_rerun_frozen_install_audit_type_and_live_fire
+2026-08-06T01:50:05Z | codex | EP-004 | SIG | full_cache_gate_format_exit_1_gateway_and_security_script_style_only_lint_unit_38_integration_49_e2e_2_build_security_audit_smoke_live_fire_2_ok
+2026-08-06T01:50:05Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_type_and_security_gates
+2026-08-06T01:50:05Z | codex | EP-004 | HEARTBEAT | Redis_TLS_production_enforcement_household_DEK_encrypted_AI_exact_cache_tenant_consent_prompt_model_mode_budget_isolation_corrupt_evict_content_free_hit_miss_metrics_cross_runtime_authenticated_DeepSeek_replay_unit_38_integration_49_e2e_2_live_fire_2_build_format_security_audit_smoke_ok

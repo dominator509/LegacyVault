@@ -1,4 +1,5 @@
 export * from "./canonical.js";
+export * from "./cache.js";
 export * from "./dlp.js";
 export * from "./gateway.js";
 export * from "./provider.js";

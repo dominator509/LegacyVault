@@ -79,6 +79,19 @@ if (
   failures.push("report persistence is not confined to encrypted payloads");
 }
 
+const runtimeSource = readFileSync("apps/api/src/runtime.ts", "utf8");
+const aiCacheSource = readFileSync("packages/ai-gateway/src/cache.ts", "utf8");
+if (
+  !runtimeSource.includes('purpose: "ai-exact-cache"') ||
+  !runtimeSource.includes("encryptEnvelope(serialized") ||
+  !runtimeSource.includes("recordApplicationCache") ||
+  !aiCacheSource.includes('requireTls && endpoint.protocol !== "rediss:"')
+) {
+  failures.push(
+    "AI exact cache lacks encryption, cache telemetry, or production TLS enforcement",
+  );
+}
+
 if (failures.length > 0) {
   for (const failure of failures)
     process.stderr.write(`security: ${failure}\n`);

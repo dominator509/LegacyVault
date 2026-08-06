@@ -127,14 +127,78 @@ describe("AI policy gateway", () => {
       gateway.cacheKey({
         organizationId: "org-1",
         householdId: "house-1",
+        purpose: envelope.promptFamily,
+        consentVersion: 1,
         envelope,
+        mode: "standard",
+        model: "contract-model",
+        maxOutputTokens: 100,
       }),
     ).not.toBe(
       gateway.cacheKey({
         organizationId: "org-2",
         householdId: "house-1",
+        purpose: envelope.promptFamily,
+        consentVersion: 1,
         envelope,
+        mode: "standard",
+        model: "contract-model",
+        maxOutputTokens: 100,
       }),
     );
+    expect(
+      gateway.cacheKey({
+        organizationId: "org-1",
+        householdId: "house-1",
+        purpose: envelope.promptFamily,
+        consentVersion: 2,
+        envelope,
+        mode: "standard",
+        model: "contract-model",
+        maxOutputTokens: 100,
+      }),
+    ).not.toBe(
+      gateway.cacheKey({
+        organizationId: "org-1",
+        householdId: "house-1",
+        purpose: envelope.promptFamily,
+        consentVersion: 1,
+        envelope,
+        mode: "standard",
+        model: "contract-model",
+        maxOutputTokens: 100,
+      }),
+    );
+  });
+
+  it("emits content-free application cache hit and miss telemetry", () => {
+    const metrics: unknown[] = [];
+    const gateway = new AiPolicyGateway(
+      new RecordingAiProvider(result),
+      (metric) => metrics.push(metric),
+    );
+    gateway.recordApplicationCache(
+      { envelope, model: "contract-model", mode: "standard" },
+      true,
+      3,
+    );
+    gateway.recordApplicationCache(
+      { envelope, model: "contract-model", mode: "standard" },
+      false,
+      4,
+    );
+    expect(metrics).toEqual([
+      expect.objectContaining({
+        outcome: "application-cache-hit",
+        latencyMs: 3,
+        estimatedCostUsd: 0,
+      }),
+      expect.objectContaining({
+        outcome: "application-cache-miss",
+        latencyMs: 4,
+        estimatedCostUsd: 0,
+      }),
+    ]);
+    expect(JSON.stringify(metrics)).not.toContain(envelope.content);
   });
 });

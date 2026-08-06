@@ -18,6 +18,7 @@ import { VaultRepository } from "@legacy/database/repository";
 import {
   AiPolicyGateway,
   createDeepSeekRuntime,
+  RedisExactCache,
   scanDlp,
   stableStringify,
   z,
@@ -186,7 +187,14 @@ export function createApplicationRuntime(environment: Environment): {
     aiMetrics.push(metric);
     if (aiMetrics.length > 1_000) aiMetrics.shift();
   });
-  const aiExactCache = new Map<string, unknown>();
+  const aiExactCache = new RedisExactCache(
+    environment.REDIS_URL,
+    `legacy:ai-exact:${createHash("sha256")
+      .update(`${environment.NODE_ENV}:${environment.WORKFLOW_QUEUE_NAME}`)
+      .digest("hex")
+      .slice(0, 16)}`,
+    environment.NODE_ENV === "production",
+  );
   const aiIdempotencyCache = new Map<
     string,
     { requestHash: string; response: unknown }
@@ -627,11 +635,53 @@ export function createApplicationRuntime(environment: Environment): {
         const exactCacheKey = aiGateway.cacheKey({
           organizationId: identity.organizationId,
           householdId: identity.householdId,
+          purpose: "interview-assistance",
+          consentVersion: consent.version,
           envelope,
+          mode: "standard",
+          model: deepSeekRuntime.model,
+          maxOutputTokens: 1_024,
         });
-        let parsed = aiExactCache.get(exactCacheKey) as
-          z.infer<typeof aiInterviewSchema> | undefined;
-        if (!parsed) {
+        let parsed: z.infer<typeof aiInterviewSchema> | undefined;
+        const cacheLookupStarted = performance.now();
+        const cached = await aiExactCache.get(exactCacheKey);
+        if (cached) {
+          const householdKey =
+            await householdKeyStore.getOrCreateActiveKey(identity);
+          let opened: Uint8Array | undefined;
+          try {
+            opened = decryptEnvelope(
+              storedEnvelope(JSON.parse(cached)),
+              householdKey.plaintextKey,
+              {
+                organizationId: identity.organizationId,
+                householdId: identity.householdId,
+                recordId: exactCacheKey,
+                purpose: "ai-exact-cache",
+                keyVersion: householdKey.keyVersion,
+              },
+            );
+            parsed = aiInterviewSchema.parse(
+              JSON.parse(Buffer.from(opened).toString("utf8")),
+            );
+          } catch {
+            await aiExactCache.delete(exactCacheKey);
+          } finally {
+            opened?.fill(0);
+            householdKey.plaintextKey.fill(0);
+          }
+        }
+        aiGateway.recordApplicationCache(
+          {
+            envelope,
+            model: deepSeekRuntime.model,
+            mode: "standard",
+          },
+          Boolean(parsed),
+          performance.now() - cacheLookupStarted,
+        );
+        const cacheMiss = !parsed;
+        if (cacheMiss) {
           parsed = await aiGateway.execute({
             organizationId: identity.organizationId,
             householdId: identity.householdId,
@@ -645,19 +695,40 @@ export function createApplicationRuntime(environment: Environment): {
             estimatedInputCostPerMillion: 0,
             estimatedOutputCostPerMillion: 0,
           });
-          for (const candidate of parsed.candidates) {
-            const category = recordCategoryFromFieldKey(candidate.fieldKey);
-            if (!categories.includes(category))
-              throw new Error("AI output exceeded allowed categories");
+        }
+        if (!parsed) throw new Error("AI response is unavailable");
+        for (const candidate of parsed.candidates) {
+          const category = recordCategoryFromFieldKey(candidate.fieldKey);
+          if (!categories.includes(category))
+            throw new Error("AI output exceeded allowed categories");
+        }
+        const outputFindings = scanDlp(stableStringify(parsed)).filter(
+          (finding) => finding !== "prompt-injection",
+        );
+        if (outputFindings.length)
+          throw new Error("AI output contains prohibited content");
+        if (cacheMiss) {
+          const householdKey =
+            await householdKeyStore.getOrCreateActiveKey(identity);
+          const serialized = Buffer.from(stableStringify(parsed), "utf8");
+          try {
+            await aiExactCache.set(
+              exactCacheKey,
+              JSON.stringify(
+                encryptEnvelope(serialized, householdKey.plaintextKey, {
+                  organizationId: identity.organizationId,
+                  householdId: identity.householdId,
+                  recordId: exactCacheKey,
+                  purpose: "ai-exact-cache",
+                  keyVersion: householdKey.keyVersion,
+                }),
+              ),
+              900,
+            );
+          } finally {
+            serialized.fill(0);
+            householdKey.plaintextKey.fill(0);
           }
-          const outputFindings = scanDlp(stableStringify(parsed)).filter(
-            (finding) => finding !== "prompt-injection",
-          );
-          if (outputFindings.length)
-            throw new Error("AI output contains prohibited content");
-          aiExactCache.set(exactCacheKey, parsed);
-          if (aiExactCache.size > 1_000)
-            aiExactCache.delete(aiExactCache.keys().next().value ?? "");
         }
         const response = {
           provider: "deepseek" as const,
@@ -690,6 +761,7 @@ export function createApplicationRuntime(environment: Environment): {
         auditStore.close(),
         workflowQueue.close(),
         householdKeyStore.close(),
+        aiExactCache.close(),
       ]);
     },
   };

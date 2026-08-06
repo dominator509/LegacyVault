@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { Redis } from "ioredis";
 import { describe, expect, it } from "vitest";
 import { createApplicationRuntime } from "../../apps/api/src/runtime.js";
 import { loadEnvironment } from "../../packages/contracts/src/environment.js";
@@ -41,7 +42,7 @@ describe("consent-bound AI interview live fire", () => {
       DEEPSEEK_MODEL: local.DEEPSEEK_MODEL,
     });
     await runMigrations(environment.DATABASE_URL ?? "");
-    const runtime = createApplicationRuntime(environment);
+    let runtime = createApplicationRuntime(environment);
     const organizationId = randomUUID();
     const householdId = randomUUID();
     const actorId = randomUUID();
@@ -95,10 +96,32 @@ describe("consent-bound AI interview live fire", () => {
         identity,
         request,
       );
-      const replay = await runtime.dependencies.runAiInterview?.(
-        identity,
-        request,
-      );
+      const namespace = `legacy:ai-exact:${createHash("sha256")
+        .update(`${environment.NODE_ENV}:${environment.WORKFLOW_QUEUE_NAME}`)
+        .digest("hex")
+        .slice(0, 16)}`;
+      const redis = new Redis(environment.REDIS_URL ?? "", {
+        lazyConnect: true,
+        enableOfflineQueue: false,
+        maxRetriesPerRequest: 1,
+      });
+      try {
+        await redis.connect();
+        const keys = await redis.keys(`${namespace}:*`);
+        expect(keys).toHaveLength(1);
+        const cachedCiphertext = await redis.get(keys[0] ?? "");
+        expect(cachedCiphertext).toContain('"algorithm":"A256GCM"');
+        expect(cachedCiphertext).not.toContain("Example Mutual");
+        expect(cachedCiphertext).not.toContain("proposedValue");
+      } finally {
+        await redis.quit();
+      }
+      await runtime.close();
+      runtime = createApplicationRuntime(environment);
+      const replay = await runtime.dependencies.runAiInterview?.(identity, {
+        ...request,
+        idempotencyKey: `ai-live-cache-replay-${randomUUID()}`,
+      });
       expect(replay).toEqual(first);
       expect(first).toMatchObject({
         provider: "deepseek",
