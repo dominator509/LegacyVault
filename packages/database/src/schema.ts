@@ -1,4 +1,5 @@
 import {
+  bigint,
   boolean,
   customType,
   integer,
@@ -308,6 +309,27 @@ export const subscriptions = pgTable("subscriptions", {
   providerCustomerId: text("provider_customer_id"),
   providerSubscriptionId: text("provider_subscription_id"),
   providerUpdatedAt: timestamp("provider_updated_at", { withTimezone: true }),
+  trialEndsAt: timestamp("trial_ends_at", { withTimezone: true }),
+  currentPeriodEndsAt: timestamp("current_period_ends_at", {
+    withTimezone: true,
+  }),
+  cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+  canceledAt: timestamp("canceled_at", { withTimezone: true }),
+  ...versioned,
+});
+
+export const billingRefunds = pgTable("billing_refunds", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  providerRefundId: text("provider_refund_id").notNull().unique(),
+  providerChargeId: text("provider_charge_id"),
+  amount: bigint("amount", { mode: "number" }).notNull(),
+  currency: text("currency").notNull(),
+  reason: text("reason"),
+  status: text("status").notNull(),
+  providerUpdatedAt: timestamp("provider_updated_at", {
+    withTimezone: true,
+  }).notNull(),
   ...versioned,
 });
 export const auditEvents = pgTable(

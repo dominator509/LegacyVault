@@ -1,6 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import type pg from "pg";
-import type { ReportKind, Role } from "@legacy/domain";
+import {
+  deriveBillingAccess,
+  type BillingAccessDecision,
+  type ReportKind,
+  type Role,
+  type SubscriptionStatus,
+} from "@legacy/domain";
 import { createDatabasePool } from "./client.js";
 
 export interface TenantContext {
@@ -65,19 +71,42 @@ export interface NormalizedBillingEvent {
   providerSubscriptionId: string;
   status: string;
   plan: string;
+  trialEndsAt: string | null;
+  currentPeriodEndsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: string | null;
 }
 
-export interface SubscriptionReadModel {
-  status:
-    | "inactive"
-    | "trialing"
-    | "active"
-    | "past_due"
-    | "canceled"
-    | "unpaid"
-    | "paused";
+export interface NormalizedRefundEvent {
+  externalEventId: string;
+  eventType: string;
+  providerUpdatedAt: string;
+  providerRefundId: string;
+  providerChargeId: string | null;
+  amount: number;
+  currency: string;
+  reason: string | null;
+  status: "pending" | "requires_action" | "succeeded" | "failed" | "canceled";
+}
+
+export interface SubscriptionReadModel extends BillingAccessDecision {
+  status: SubscriptionStatus;
   plan: string | null;
   providerUpdatedAt: string | null;
+  trialEndsAt: string | null;
+  currentPeriodEndsAt: string | null;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: string | null;
+  version: number;
+}
+
+export interface BillingRefundReadModel {
+  id: string;
+  amount: number;
+  currency: string;
+  reason: string | null;
+  status: NormalizedRefundEvent["status"];
+  providerUpdatedAt: string;
   version: number;
 }
 export type PrivacyRequestKind =
@@ -2130,12 +2159,16 @@ export class VaultRepository {
             providerSubscriptionId: event.providerSubscriptionId,
             status: event.status,
             plan: event.plan,
+            trialEndsAt: event.trialEndsAt,
+            currentPeriodEndsAt: event.currentPeriodEndsAt,
+            cancelAtPeriodEnd: event.cancelAtPeriodEnd,
+            canceledAt: event.canceledAt,
           }),
         ],
       );
       if (inserted.rowCount === 0) return { outcome: "duplicate" };
       const subscription = await client.query(
-        "insert into subscriptions(id,organization_id,household_id,status,plan,provider_customer_id,provider_subscription_id,provider_updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (organization_id,household_id) do update set status=excluded.status,plan=excluded.plan,provider_customer_id=excluded.provider_customer_id,provider_subscription_id=excluded.provider_subscription_id,provider_updated_at=excluded.provider_updated_at,version=subscriptions.version+1 where subscriptions.provider_updated_at is null or subscriptions.provider_updated_at <= excluded.provider_updated_at returning id",
+        "insert into subscriptions(id,organization_id,household_id,status,plan,provider_customer_id,provider_subscription_id,provider_updated_at,trial_ends_at,current_period_ends_at,cancel_at_period_end,canceled_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) on conflict (organization_id,household_id) do update set status=excluded.status,plan=excluded.plan,provider_customer_id=excluded.provider_customer_id,provider_subscription_id=excluded.provider_subscription_id,provider_updated_at=excluded.provider_updated_at,trial_ends_at=excluded.trial_ends_at,current_period_ends_at=excluded.current_period_ends_at,cancel_at_period_end=excluded.cancel_at_period_end,canceled_at=excluded.canceled_at,version=subscriptions.version+1 where subscriptions.provider_updated_at is null or subscriptions.provider_updated_at <= excluded.provider_updated_at returning id",
         [
           randomUUID(),
           context.organizationId,
@@ -2145,6 +2178,10 @@ export class VaultRepository {
           event.providerCustomerId,
           event.providerSubscriptionId,
           event.providerCreatedAt,
+          event.trialEndsAt,
+          event.currentPeriodEndsAt,
+          event.cancelAtPeriodEnd,
+          event.canceledAt,
         ],
       );
       await client.query(
@@ -2163,24 +2200,132 @@ export class VaultRepository {
         status: SubscriptionReadModel["status"];
         plan: string;
         provider_updated_at: Date | null;
+        trial_ends_at: Date | null;
+        current_period_ends_at: Date | null;
+        cancel_at_period_end: boolean;
+        canceled_at: Date | null;
         version: number;
       }>(
-        "select status,plan,provider_updated_at,version from subscriptions order by version desc limit 1",
+        "select status,plan,provider_updated_at,trial_ends_at,current_period_ends_at,cancel_at_period_end,canceled_at,version from subscriptions order by version desc limit 1",
       );
       const row = result.rows[0];
       if (!row)
-        return {
-          status: "inactive",
-          plan: null,
-          providerUpdatedAt: null,
-          version: 0,
-        };
-      return {
+        return Object.assign(
+          {
+            status: "inactive",
+            plan: null,
+            providerUpdatedAt: null,
+            trialEndsAt: null,
+            currentPeriodEndsAt: null,
+            cancelAtPeriodEnd: false,
+            canceledAt: null,
+            version: 0,
+          } as const,
+          deriveBillingAccess({
+            status: "inactive",
+            plan: null,
+            providerUpdatedAt: null,
+          }),
+        );
+      const subscription = {
         status: row.status,
         plan: row.plan,
         providerUpdatedAt: row.provider_updated_at?.toISOString() ?? null,
+        trialEndsAt: row.trial_ends_at?.toISOString() ?? null,
+        currentPeriodEndsAt: row.current_period_ends_at?.toISOString() ?? null,
+        cancelAtPeriodEnd: row.cancel_at_period_end,
+        canceledAt: row.canceled_at?.toISOString() ?? null,
         version: row.version,
       };
+      return Object.assign(subscription, deriveBillingAccess(subscription));
+    });
+  }
+
+  async getBillingProviderCustomerId(
+    context: TenantContext,
+  ): Promise<string | null> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        provider_customer_id: string | null;
+      }>(
+        "select provider_customer_id from subscriptions order by version desc limit 1",
+      );
+      return result.rows[0]?.provider_customer_id ?? null;
+    });
+  }
+
+  async processRefundEvent(
+    context: TenantContext,
+    event: NormalizedRefundEvent,
+  ): Promise<{ outcome: "applied" | "duplicate" | "stale" }> {
+    return this.withTenant(context, async (client) => {
+      const inserted = await client.query(
+        "insert into billing_events(id,organization_id,household_id,external_event_id,event_type,provider_created_at,payload) values ($1,$2,$3,$4,$5,$6,$7) on conflict (external_event_id) do nothing",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          event.externalEventId,
+          event.eventType,
+          event.providerUpdatedAt,
+          JSON.stringify({
+            providerRefundId: event.providerRefundId,
+            providerChargeId: event.providerChargeId,
+            amount: event.amount,
+            currency: event.currency,
+            reason: event.reason,
+            status: event.status,
+          }),
+        ],
+      );
+      if (inserted.rowCount === 0) return { outcome: "duplicate" };
+      const refund = await client.query(
+        "insert into billing_refunds(id,organization_id,household_id,provider_refund_id,provider_charge_id,amount,currency,reason,status,provider_updated_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) on conflict (provider_refund_id) do update set provider_charge_id=excluded.provider_charge_id,amount=excluded.amount,currency=excluded.currency,reason=excluded.reason,status=excluded.status,provider_updated_at=excluded.provider_updated_at,version=billing_refunds.version+1 where billing_refunds.provider_updated_at <= excluded.provider_updated_at returning id",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          event.providerRefundId,
+          event.providerChargeId,
+          event.amount,
+          event.currency,
+          event.reason,
+          event.status,
+          event.providerUpdatedAt,
+        ],
+      );
+      await client.query(
+        "update billing_events set processed_at=now() where external_event_id=$1",
+        [event.externalEventId],
+      );
+      return { outcome: refund.rowCount === 1 ? "applied" : "stale" };
+    });
+  }
+
+  async listBillingRefunds(
+    context: TenantContext,
+  ): Promise<readonly BillingRefundReadModel[]> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        amount: string;
+        currency: string;
+        reason: string | null;
+        status: BillingRefundReadModel["status"];
+        provider_updated_at: Date;
+        version: number;
+      }>(
+        "select id,amount,currency,reason,status,provider_updated_at,version from billing_refunds order by provider_updated_at desc,id desc limit 100",
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        amount: Number(row.amount),
+        currency: row.currency,
+        reason: row.reason,
+        status: row.status,
+        providerUpdatedAt: row.provider_updated_at.toISOString(),
+        version: row.version,
+      }));
     });
   }
 

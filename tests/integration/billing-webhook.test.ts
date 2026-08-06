@@ -75,10 +75,48 @@ function signedEvent(input: { id: string; created: number; status: string }) {
         id: subscriptionId,
         customer: customerId,
         status: input.status,
+        trial_end: null,
+        current_period_end: 2_000_003_600,
+        cancel_at_period_end: true,
+        canceled_at: null,
         metadata: {
           legacy_organization_id: organizationId,
           legacy_household_id: householdId,
           legacy_plan: "essential",
+        },
+      },
+    },
+  });
+  const timestamp = Math.floor(Date.now() / 1_000);
+  const signature = createHmac("sha256", secret)
+    .update(String(timestamp))
+    .update(".")
+    .update(payload)
+    .digest("hex");
+  return { payload, header: `t=${timestamp},v1=${signature}` };
+}
+
+function signedRefundEvent(input: {
+  id: string;
+  created: number;
+  refundId: string;
+  status: string;
+}) {
+  const payload = JSON.stringify({
+    id: input.id,
+    type: input.status === "failed" ? "refund.failed" : "refund.updated",
+    created: input.created,
+    data: {
+      object: {
+        id: input.refundId,
+        charge: "ch_local_contract",
+        amount: 2500,
+        currency: "usd",
+        reason: "requested_by_customer",
+        status: input.status,
+        metadata: {
+          legacy_organization_id: organizationId,
+          legacy_household_id: householdId,
         },
       },
     },
@@ -100,7 +138,27 @@ describe("signed Stripe webhook persistence", () => {
       status: "inactive",
       plan: null,
       providerUpdatedAt: null,
+      trialEndsAt: null,
+      currentPeriodEndsAt: null,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
       version: 0,
+      access: "read-only",
+      graceUntil: null,
+      entitlements: {
+        vaultRead: true,
+        vaultWrite: false,
+        documentUpload: false,
+        aiInterview: false,
+        reportGeneration: false,
+        exportGeneration: false,
+      },
+      quotas: {
+        households: 1,
+        members: null,
+        storageBytes: null,
+        aiInterviewsMonthly: null,
+      },
     });
     const newest = signedEvent({
       id: `evt_${randomUUID()}`,
@@ -149,8 +207,35 @@ describe("signed Stripe webhook persistence", () => {
       status: "active",
       plan: "essential",
       providerUpdatedAt: new Date(2_000_000_000 * 1_000).toISOString(),
+      trialEndsAt: null,
+      currentPeriodEndsAt: new Date(2_000_003_600 * 1_000).toISOString(),
+      cancelAtPeriodEnd: true,
+      canceledAt: null,
       version: 1,
+      access: "full",
+      graceUntil: null,
+      entitlements: {
+        vaultRead: true,
+        vaultWrite: true,
+        documentUpload: true,
+        aiInterview: true,
+        reportGeneration: true,
+        exportGeneration: true,
+      },
+      quotas: {
+        households: 1,
+        members: null,
+        storageBytes: null,
+        aiInterviewsMonthly: null,
+      },
     });
+    await expect(
+      repository.getBillingProviderCustomerId({
+        organizationId,
+        householdId,
+        actorId,
+      }),
+    ).resolves.toBe(customerId);
   });
 
   it("rejects a bad signature without persisting the event", async () => {
@@ -176,5 +261,47 @@ describe("signed Stripe webhook persistence", () => {
       title: "Invalid webhook",
       status: 400,
     });
+  });
+
+  it("persists ordered signed refund lifecycle state without exposing provider identifiers", async () => {
+    const refundId = `re_${randomUUID().replaceAll("-", "")}`;
+    const refund = signedRefundEvent({
+      id: `evt_${randomUUID()}`,
+      created: 2_000_000_100,
+      refundId,
+      status: "succeeded",
+    });
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/billing/webhooks/stripe",
+      headers: {
+        "content-type": "application/json",
+        "stripe-signature": refund.header,
+      },
+      payload: refund.payload,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ received: true, outcome: "applied" });
+    await expect(
+      repository.listBillingRefunds({ organizationId, householdId, actorId }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        amount: 2500,
+        currency: "usd",
+        reason: "requested_by_customer",
+        status: "succeeded",
+        providerUpdatedAt: new Date(2_000_000_100 * 1_000).toISOString(),
+        version: 1,
+      }),
+    ]);
+    expect(
+      JSON.stringify(
+        await repository.listBillingRefunds({
+          organizationId,
+          householdId,
+          actorId,
+        }),
+      ),
+    ).not.toContain(refundId);
   });
 });

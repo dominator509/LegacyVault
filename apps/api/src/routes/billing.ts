@@ -83,14 +83,20 @@ export async function registerBillingRoutes(
           .code(400)
           .type("application/problem+json")
           .send(problem(request.id, 400, "Invalid webhook"));
-      let event;
+      let subscriptionEvent;
+      let refundEvent;
       try {
         const verified = dependencies.stripe.verifyWebhook(
           request.body,
           signature,
         );
-        event = dependencies.stripe.normalizeSubscriptionEvent(verified);
-        if (!event) return reply.send({ received: true, ignored: true });
+        subscriptionEvent =
+          dependencies.stripe.normalizeSubscriptionEvent(verified);
+        refundEvent = subscriptionEvent
+          ? undefined
+          : dependencies.stripe.normalizeRefundEvent(verified);
+        if (!subscriptionEvent && !refundEvent)
+          return reply.send({ received: true, ignored: true });
       } catch {
         return reply
           .code(400)
@@ -98,14 +104,22 @@ export async function registerBillingRoutes(
           .send(problem(request.id, 400, "Invalid webhook"));
       }
       try {
-        const result = await dependencies.repository.processBillingEvent(
-          {
-            organizationId: event.organizationId,
-            householdId: event.householdId,
-            actorId: event.organizationId,
-          },
-          event,
-        );
+        const event = subscriptionEvent ?? refundEvent;
+        if (!event) throw new Error("normalized billing event unavailable");
+        const context = {
+          organizationId: event.organizationId,
+          householdId: event.householdId,
+          actorId: event.organizationId,
+        };
+        const result = subscriptionEvent
+          ? await dependencies.repository.processBillingEvent(
+              context,
+              subscriptionEvent,
+            )
+          : await dependencies.repository.processRefundEvent(
+              context,
+              refundEvent!,
+            );
         return reply.send({ received: true, outcome: result.outcome });
       } catch {
         return reply

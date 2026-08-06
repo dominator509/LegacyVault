@@ -51,6 +51,7 @@ let observedDocumentUpload: unknown;
 let observedReportId: string | undefined;
 let observedFactCategories: readonly string[] = [];
 let observedInvitationToken = "";
+let billingAccessEnabled = true;
 const completedExportId = randomUUID();
 const server = buildServer({
   repository,
@@ -284,12 +285,47 @@ const server = buildServer({
     id: "cs_local_contract",
     url: "https://checkout.stripe.test/session",
   }),
+  createBillingPortal: async () => ({
+    id: "bps_local_contract",
+    url: "https://billing.stripe.test/session",
+  }),
   getSubscription: async () => ({
     status: "active",
     plan: "essential",
     providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+    trialEndsAt: null,
+    currentPeriodEndsAt: "2026-09-06T00:00:00.000Z",
+    cancelAtPeriodEnd: true,
+    canceledAt: null,
     version: 2,
+    access: billingAccessEnabled ? "full" : "read-only",
+    graceUntil: null,
+    entitlements: {
+      vaultRead: true,
+      vaultWrite: billingAccessEnabled,
+      documentUpload: billingAccessEnabled,
+      aiInterview: billingAccessEnabled,
+      reportGeneration: billingAccessEnabled,
+      exportGeneration: billingAccessEnabled,
+    },
+    quotas: {
+      households: 1,
+      members: null,
+      storageBytes: null,
+      aiInterviewsMonthly: null,
+    },
   }),
+  listBillingRefunds: async () => [
+    {
+      id: "55555555-5555-4555-8555-555555555555",
+      amount: 2500,
+      currency: "usd",
+      reason: "requested_by_customer",
+      status: "succeeded",
+      providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+      version: 1,
+    },
+  ],
   startDocumentUpload: async (_resolved, input) => {
     observedDocumentUpload = input;
     return {
@@ -458,6 +494,8 @@ describe("vault API persistence", () => {
       "/v1/reports",
       "/v1/emergency-access",
       "/v1/billing/checkout",
+      "/v1/billing/portal",
+      "/v1/billing/refunds",
       "/v1/billing/subscription",
     ])
       expect(specification.paths).toHaveProperty(path);
@@ -680,10 +718,54 @@ describe("vault API persistence", () => {
       status: "active",
       plan: "essential",
       providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+      trialEndsAt: null,
+      currentPeriodEndsAt: "2026-09-06T00:00:00.000Z",
+      cancelAtPeriodEnd: true,
+      canceledAt: null,
       version: 2,
+      access: "full",
+      graceUntil: null,
+      entitlements: {
+        vaultRead: true,
+        vaultWrite: true,
+        documentUpload: true,
+        aiInterview: true,
+        reportGeneration: true,
+        exportGeneration: true,
+      },
+      quotas: {
+        households: 1,
+        members: null,
+        storageBytes: null,
+        aiInterviewsMonthly: null,
+      },
     });
     expect(response.body).not.toContain("providerCustomer");
     expect(response.body).not.toContain("providerSubscription");
+  });
+
+  it("returns bounded refund state without provider identifiers", async () => {
+    const response = await server.inject({
+      method: "GET",
+      url: "/v1/billing/refunds",
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.json()).toEqual({
+      refunds: [
+        {
+          id: "55555555-5555-4555-8555-555555555555",
+          amount: 2500,
+          currency: "usd",
+          reason: "requested_by_customer",
+          status: "succeeded",
+          providerUpdatedAt: "2026-08-06T00:00:00.000Z",
+          version: 1,
+        },
+      ],
+    });
+    expect(response.body).not.toContain("providerRefund");
+    expect(response.body).not.toContain("providerCharge");
   });
 
   it("creates and replays an encrypted candidate fact then confirms it optimistically", async () => {
@@ -1278,6 +1360,51 @@ describe("vault API persistence", () => {
       action: "approve",
       purpose: "vault.billing.checkout",
     });
+  });
+
+  it("authorizes a version-bound short-lived billing portal session", async () => {
+    const portal = await server.inject({
+      method: "POST",
+      url: "/v1/billing/portal",
+      headers: {
+        "idempotency-key": `portal-${randomUUID()}`,
+        "if-match": "2",
+      },
+    });
+    expect(portal.statusCode).toBe(201);
+    expect(portal.json()).toEqual({
+      id: "bps_local_contract",
+      url: "https://billing.stripe.test/session",
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "household-instructions",
+      action: "approve",
+      purpose: "vault.billing.portal",
+    });
+  });
+
+  it("fails closed before queuing a billable operation when access is read-only", async () => {
+    billingAccessEnabled = false;
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/v1/reports",
+        headers: {
+          "idempotency-key": `report-billing-denied-${randomUUID()}`,
+          "if-match": "0",
+        },
+        payload: { kind: "annual-review" },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(response.headers["content-type"]).toContain(
+        "application/problem+json",
+      );
+      expect(response.json()).toMatchObject({
+        title: "Subscription required",
+      });
+    } finally {
+      billingAccessEnabled = true;
+    }
   });
 
   it("decides and releases compartmentalized emergency access with optimistic delay enforcement", async () => {

@@ -95,6 +95,153 @@ const privacyRequestPathSchema = {
   properties: { requestId: { type: "string", format: "uuid" } },
 } as const;
 
+const billingSessionResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "url"],
+  properties: {
+    id: { type: "string", minLength: 1 },
+    url: { type: "string", format: "uri" },
+  },
+} as const;
+
+const subscriptionResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "status",
+    "plan",
+    "providerUpdatedAt",
+    "trialEndsAt",
+    "currentPeriodEndsAt",
+    "cancelAtPeriodEnd",
+    "canceledAt",
+    "version",
+    "access",
+    "graceUntil",
+    "entitlements",
+    "quotas",
+  ],
+  properties: {
+    status: {
+      type: "string",
+      enum: [
+        "inactive",
+        "incomplete",
+        "incomplete_expired",
+        "trialing",
+        "active",
+        "past_due",
+        "canceled",
+        "unpaid",
+        "paused",
+      ],
+    },
+    plan: { anyOf: [{ type: "string" }, { type: "null" }] },
+    providerUpdatedAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    trialEndsAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    currentPeriodEndsAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    cancelAtPeriodEnd: { type: "boolean" },
+    canceledAt: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    version: { type: "integer", minimum: 0 },
+    access: { type: "string", enum: ["full", "grace", "read-only"] },
+    graceUntil: {
+      anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    entitlements: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "vaultRead",
+        "vaultWrite",
+        "documentUpload",
+        "aiInterview",
+        "reportGeneration",
+        "exportGeneration",
+      ],
+      properties: {
+        vaultRead: { type: "boolean" },
+        vaultWrite: { type: "boolean" },
+        documentUpload: { type: "boolean" },
+        aiInterview: { type: "boolean" },
+        reportGeneration: { type: "boolean" },
+        exportGeneration: { type: "boolean" },
+      },
+    },
+    quotas: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "households",
+        "members",
+        "storageBytes",
+        "aiInterviewsMonthly",
+      ],
+      properties: {
+        households: { type: "integer", minimum: 1 },
+        members: { anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }] },
+        storageBytes: {
+          anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+        },
+        aiInterviewsMonthly: {
+          anyOf: [{ type: "integer", minimum: 1 }, { type: "null" }],
+        },
+      },
+    },
+  },
+} as const;
+
+const billingRefundListResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["refunds"],
+  properties: {
+    refunds: {
+      type: "array",
+      maxItems: 100,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "id",
+          "amount",
+          "currency",
+          "reason",
+          "status",
+          "providerUpdatedAt",
+          "version",
+        ],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          amount: { type: "integer", minimum: 1 },
+          currency: { type: "string", pattern: "^[a-z]{3}$" },
+          reason: { anyOf: [{ type: "string" }, { type: "null" }] },
+          status: {
+            type: "string",
+            enum: [
+              "pending",
+              "requires_action",
+              "succeeded",
+              "failed",
+              "canceled",
+            ],
+          },
+          providerUpdatedAt: { type: "string", format: "date-time" },
+          version: { type: "integer", minimum: 1 },
+        },
+      },
+    },
+  },
+} as const;
+
 function creationVersion(request: FastifyRequest): 0 {
   if (request.headers["if-match"] !== "0")
     throw new ApiProblem(
@@ -147,6 +294,32 @@ function factCategory(fieldKey: string): RecordCategory {
       "fieldKey must begin with a canonical record category",
     );
   }
+}
+
+type BillableEntitlement =
+  "documentUpload" | "aiInterview" | "reportGeneration" | "exportGeneration";
+
+async function requireBillingEntitlement(
+  getSubscription:
+    ((identity: AuthenticatedTenantIdentity) => Promise<unknown>) | undefined,
+  identity: AuthenticatedTenantIdentity,
+  entitlement: BillableEntitlement,
+): Promise<void> {
+  if (!getSubscription)
+    throw new ApiProblem(
+      503,
+      "Billing unavailable",
+      "Subscription access cannot be verified.",
+    );
+  const subscription = (await getSubscription(identity)) as {
+    entitlements?: Partial<Record<BillableEntitlement, unknown>>;
+  };
+  if (subscription.entitlements?.[entitlement] !== true)
+    throw new ApiProblem(
+      403,
+      "Subscription required",
+      "The current subscription does not permit this operation.",
+    );
 }
 
 export async function registerVaultRoutes(
@@ -211,9 +384,16 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       idempotencyKey: string,
     ) => Promise<{ id: string; url: string }>;
+    createBillingPortal?: (
+      identity: AuthenticatedTenantIdentity,
+      idempotencyKey: string,
+    ) => Promise<{ id: string; url: string }>;
     getSubscription?: (
       identity: AuthenticatedTenantIdentity,
     ) => Promise<unknown>;
+    listBillingRefunds?: (
+      identity: AuthenticatedTenantIdentity,
+    ) => Promise<readonly unknown[]>;
     startDocumentUpload?: (
       identity: AuthenticatedTenantIdentity,
       input: {
@@ -748,6 +928,11 @@ export async function registerVaultRoutes(
           action: "create",
           purpose: "vault.document.create",
         });
+      await requireBillingEntitlement(
+        dependencies.getSubscription,
+        identity,
+        "documentUpload",
+      );
       if (!dependencies.startDocumentUpload)
         throw new ApiProblem(
           503,
@@ -1052,6 +1237,11 @@ export async function registerVaultRoutes(
           action: "read",
           purpose: "vault.ai.interview",
         });
+      await requireBillingEntitlement(
+        dependencies.getSubscription,
+        identity,
+        "aiInterview",
+      );
       if (!dependencies.runAiInterview)
         throw new ApiProblem(
           503,
@@ -1987,6 +2177,11 @@ export async function registerVaultRoutes(
           action: "export",
           purpose: "vault.export.create",
         });
+      await requireBillingEntitlement(
+        dependencies.getSubscription,
+        identity,
+        "exportGeneration",
+      );
       const body = objectBody(request.body);
       const encodedKey = requiredString(body, "exportKeyBase64");
       if (!/^[A-Za-z0-9+/]{43}=$/u.test(encodedKey))
@@ -2137,6 +2332,11 @@ export async function registerVaultRoutes(
           action: "read",
           purpose: "vault.report.create",
         });
+      await requireBillingEntitlement(
+        dependencies.getSubscription,
+        identity,
+        "reportGeneration",
+      );
       const body = objectBody(request.body);
       const kind = requiredString(body, "kind");
       if (
@@ -2184,6 +2384,14 @@ export async function registerVaultRoutes(
         summary: "Create a hosted billing checkout",
         security: [{ sessionCookie: [] }],
         headers: mutationWriteHeaderSchema,
+        response: {
+          201: {
+            description: "Short-lived hosted checkout session created",
+            content: {
+              "application/json": { schema: billingSessionResponseSchema },
+            },
+          },
+        },
       },
     },
     async (request, reply) => {
@@ -2234,6 +2442,66 @@ export async function registerVaultRoutes(
     },
   );
 
+  server.post(
+    "/v1/billing/portal",
+    {
+      schema: {
+        tags: ["billing"],
+        summary: "Create a short-lived hosted billing management session",
+        security: [{ sessionCookie: [] }],
+        headers: mutationWriteHeaderSchema,
+        response: {
+          201: {
+            description: "Short-lived hosted billing portal session created",
+            content: {
+              "application/json": { schema: billingSessionResponseSchema },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.createBillingPortal || !dependencies.getSubscription)
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Billing management is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.billing.portal",
+      });
+      const expectedVersion = mutationVersion(request);
+      const subscription = (await dependencies.getSubscription(identity)) as {
+        version?: unknown;
+      };
+      if (subscription.version !== expectedVersion)
+        throw new ApiProblem(
+          409,
+          "Version conflict",
+          "The subscription changed before billing management was opened.",
+        );
+      try {
+        return reply
+          .code(201)
+          .send(
+            await dependencies.createBillingPortal(
+              identity,
+              idempotencyKey(request),
+            ),
+          );
+      } catch {
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Billing management could not be opened.",
+        );
+      }
+    },
+  );
+
   server.get(
     "/v1/billing/subscription",
     {
@@ -2241,6 +2509,14 @@ export async function registerVaultRoutes(
         tags: ["billing"],
         summary: "Read authoritative subscription status",
         security: [{ sessionCookie: [] }],
+        response: {
+          200: {
+            description: "Provider-independent subscription access state",
+            content: {
+              "application/json": { schema: subscriptionResponseSchema },
+            },
+          },
+        },
       },
     },
     async (request, reply) => {
@@ -2259,6 +2535,42 @@ export async function registerVaultRoutes(
       return reply
         .header("cache-control", "no-store")
         .send(await dependencies.getSubscription(identity));
+    },
+  );
+
+  server.get(
+    "/v1/billing/refunds",
+    {
+      schema: {
+        tags: ["billing"],
+        summary: "List authoritative refund lifecycle state",
+        security: [{ sessionCookie: [] }],
+        response: {
+          200: {
+            description: "Bounded provider-independent refund state",
+            content: {
+              "application/json": { schema: billingRefundListResponseSchema },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.listBillingRefunds)
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Refund retrieval is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.billing.refunds.read",
+      });
+      return reply.header("cache-control", "no-store").send({
+        refunds: await dependencies.listBillingRefunds(identity),
+      });
     },
   );
 }

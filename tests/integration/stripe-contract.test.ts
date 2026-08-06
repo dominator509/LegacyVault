@@ -79,4 +79,105 @@ describe("Stripe checkout HTTP contract", () => {
         "11111111-1111-4111-8111-111111111111",
     });
   });
+
+  it("creates an authenticated idempotent short-lived customer portal session", async () => {
+    let authorization = "";
+    let idempotency = "";
+    let received = new URLSearchParams();
+    const server = createServer((request, response) => {
+      authorization = request.headers.authorization ?? "";
+      idempotency = String(request.headers["idempotency-key"] ?? "");
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        received = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            id: "bps_contract",
+            url: "https://billing.stripe.test/session",
+          }),
+        );
+      });
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const adapter = new StripeAdapter({
+      secretKey: "sk_test_contract",
+      baseUrl: `http://127.0.0.1:${address.port}/`,
+      timeoutMs: 2_000,
+    });
+    await expect(
+      adapter.createBillingPortal({
+        customerId: "cus_contract1",
+        returnUrl: "https://app.example.test/billing",
+        idempotencyKey: "portal-contract-key",
+      }),
+    ).resolves.toEqual({
+      id: "bps_contract",
+      url: "https://billing.stripe.test/session",
+    });
+    expect(authorization).toBe("Bearer sk_test_contract");
+    expect(idempotency).toBe("portal-contract-key");
+    expect(Object.fromEntries(received)).toEqual({
+      customer: "cus_contract1",
+      return_url: "https://app.example.test/billing",
+    });
+  });
+
+  it("retries bounded transient rate limits without changing idempotency", async () => {
+    let attempts = 0;
+    const idempotencyKeys: string[] = [];
+    const server = createServer((request, response) => {
+      attempts += 1;
+      idempotencyKeys.push(String(request.headers["idempotency-key"] ?? ""));
+      request.resume();
+      if (attempts < 3) {
+        response.writeHead(429, { "content-type": "application/json" });
+        response.end(JSON.stringify({ error: { type: "rate_limit_error" } }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          id: "cs_after_retry",
+          url: "https://checkout.stripe.test/retry",
+        }),
+      );
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const adapter = new StripeAdapter({
+      secretKey: "sk_test_contract",
+      essentialPriceId: "price_contract",
+      baseUrl: `http://127.0.0.1:${address.port}/`,
+      timeoutMs: 2_000,
+    });
+    await expect(
+      adapter.createCheckout({
+        clientReferenceId: "membership-contract",
+        successUrl: "https://app.example.test/billing/success",
+        cancelUrl: "https://app.example.test/billing/cancel",
+        idempotencyKey: "checkout-retry-key",
+        organizationId: "11111111-1111-4111-8111-111111111111",
+        householdId: "22222222-2222-4222-8222-222222222222",
+        plan: "essential",
+      }),
+    ).resolves.toEqual({
+      id: "cs_after_retry",
+      url: "https://checkout.stripe.test/retry",
+    });
+    expect(attempts).toBe(3);
+    expect(idempotencyKeys).toEqual([
+      "checkout-retry-key",
+      "checkout-retry-key",
+      "checkout-retry-key",
+    ]);
+  });
 });

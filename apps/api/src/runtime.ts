@@ -690,7 +690,18 @@ export function createApplicationRuntime(environment: Environment): {
           householdId: identity.householdId,
           plan: "essential",
         }),
+      createBillingPortal: async (identity, idempotencyKey) => {
+        const customerId =
+          await repository.getBillingProviderCustomerId(identity);
+        if (!customerId) throw new Error("billing customer is not available");
+        return stripe.createBillingPortal({
+          customerId,
+          returnUrl: new URL("/billing", environment.APP_BASE_URL).toString(),
+          idempotencyKey,
+        });
+      },
       getSubscription: (identity) => repository.getSubscription(identity),
+      listBillingRefunds: (identity) => repository.listBillingRefunds(identity),
       startDocumentUpload: async (identity, input) => {
         const id = randomUUID();
         const dataKey = randomBytes(32);

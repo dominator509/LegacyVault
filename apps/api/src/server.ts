@@ -132,7 +132,14 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     idempotencyKey: string,
   ) => Promise<{ id: string; url: string }>;
+  createBillingPortal?: (
+    identity: AuthenticatedTenantIdentity,
+    idempotencyKey: string,
+  ) => Promise<{ id: string; url: string }>;
   getSubscription?: (identity: AuthenticatedTenantIdentity) => Promise<unknown>;
+  listBillingRefunds?: (
+    identity: AuthenticatedTenantIdentity,
+  ) => Promise<readonly unknown[]>;
   startDocumentUpload?: (
     identity: AuthenticatedTenantIdentity,
     input: {
@@ -215,7 +222,9 @@ export function buildServer(dependencies?: ServerDependencies) {
       !dependencies.createReport ||
       !dependencies.getReport ||
       !dependencies.createCheckout ||
+      !dependencies.createBillingPortal ||
       !dependencies.getSubscription ||
+      !dependencies.listBillingRefunds ||
       !dependencies.startDocumentUpload ||
       !dependencies.createDocumentUploadUrl ||
       !dependencies.completeDocumentUpload ||
