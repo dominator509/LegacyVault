@@ -255,3 +255,7 @@
 2026-08-06T03:44:43Z | codex | EP-004 | HYPOTHESIS | read_the_actual_health_E2E_structure_then_apply_the_reviewed_manifest_server_and_test_changes_with_exact_context
 2026-08-06T03:44:43Z | codex | EP-004 | HEARTBEAT | pinned_fastify_swagger_9_8_1_frozen_install_zero_known_vulnerabilities_non_cacheable_OpenAPI_3_1_live_route_inventory_real_TCP_E2E_3_focused_21_tests_type_security_ok_operation_schemas_pending
 2026-08-06T03:46:57Z | codex | EP-004 | HEARTBEAT | OpenAPI_foundation_checkpoint_unit_41_integration_58_e2e_3_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:53:07Z | codex | EP-004 | SIG | first_read_operation_schema_API_test_expected_invalid_report_UUID_400_but_Fastify_validation_error_mapped_to_500
+2026-08-06T03:53:07Z | codex | EP-004 | HYPOTHESIS | recognize_Fastify_validation_errors_in_the_shared_error_boundary_and_return_a_content_safe_RFC9457_400
+2026-08-06T03:53:07Z | codex | EP-004 | HEARTBEAT | OpenAPI_read_operation_tags_security_category_bounds_pagination_bounds_UUID_paths_and_safe_schema_validation_problem_focused_API_18_type_security_ok_write_and_response_schemas_pending
+2026-08-06T05:06:41Z | codex | EP-004 | HEARTBEAT | OpenAPI_read_schema_checkpoint_unit_41_integration_58_e2e_3_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

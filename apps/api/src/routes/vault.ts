@@ -231,33 +231,41 @@ export async function registerVaultRoutes(
 ): Promise<void> {
   server.setErrorHandler((error, request, reply) => {
     const message = error instanceof Error ? error.message : "unknown error";
+    const schemaValidationFailed =
+      typeof error === "object" && error !== null && "validation" in error;
     const problem =
       error instanceof ApiProblem
         ? error
-        : error instanceof AuthenticationRequiredError
+        : schemaValidationFailed
           ? new ApiProblem(
-              401,
-              "Authentication required",
-              "Authentication is required.",
+              400,
+              "Invalid request",
+              "The request does not match the API schema.",
             )
-          : error instanceof HouseholdSelectionRequiredError
+          : error instanceof AuthenticationRequiredError
             ? new ApiProblem(
-                409,
-                "Household selection required",
-                "Select an accessible household.",
+                401,
+                "Authentication required",
+                "Authentication is required.",
               )
-            : error instanceof AuthorizationDeniedError
-              ? new ApiProblem(403, "Access denied", "Access is denied.")
-              : new ApiProblem(
-                  message.includes("conflict") ||
-                    message.includes("idempotency")
-                    ? 409
-                    : 500,
-                  message.includes("conflict")
-                    ? "Version conflict"
-                    : "Request failed",
-                  "The request could not be completed.",
-                );
+            : error instanceof HouseholdSelectionRequiredError
+              ? new ApiProblem(
+                  409,
+                  "Household selection required",
+                  "Select an accessible household.",
+                )
+              : error instanceof AuthorizationDeniedError
+                ? new ApiProblem(403, "Access denied", "Access is denied.")
+                : new ApiProblem(
+                    message.includes("conflict") ||
+                      message.includes("idempotency")
+                      ? 409
+                      : 500,
+                    message.includes("conflict")
+                      ? "Version conflict"
+                      : "Request failed",
+                    "The request could not be completed.",
+                  );
     return reply.code(problem.status).type("application/problem+json").send({
       type: "about:blank",
       title: problem.title,
@@ -270,6 +278,20 @@ export async function registerVaultRoutes(
 
   server.get<{ Querystring: { category?: string } }>(
     "/v1/facts",
+    {
+      schema: {
+        tags: ["facts"],
+        summary: "List authorized vault facts",
+        security: [{ sessionCookie: [] }],
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            category: { type: "string", enum: [...allRecordCategories] },
+          },
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!dependencies.listVaultFacts)
@@ -415,62 +437,90 @@ export async function registerVaultRoutes(
     return reply.code(201).send(created);
   });
 
-  server.get("/v1/documents", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.listVaultDocuments)
-      throw new ApiProblem(
-        503,
-        "Vault unavailable",
-        "Document retrieval is not configured.",
-      );
-    for (const category of allRecordCategories)
-      await dependencies.authorizeIdentity?.(identity, {
-        category,
-        action: "read",
-        purpose: "vault.document.list",
-      });
-    const documents = await dependencies.listVaultDocuments(identity);
-    return reply.header("cache-control", "no-store").send({ documents });
-  });
+  server.get(
+    "/v1/documents",
+    {
+      schema: {
+        tags: ["documents"],
+        summary: "List safe document metadata",
+        security: [{ sessionCookie: [] }],
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.listVaultDocuments)
+        throw new ApiProblem(
+          503,
+          "Vault unavailable",
+          "Document retrieval is not configured.",
+        );
+      for (const category of allRecordCategories)
+        await dependencies.authorizeIdentity?.(identity, {
+          category,
+          action: "read",
+          purpose: "vault.document.list",
+        });
+      const documents = await dependencies.listVaultDocuments(identity);
+      return reply.header("cache-control", "no-store").send({ documents });
+    },
+  );
 
-  server.get("/v1/audit-events", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.listAuditEvents)
-      throw new ApiProblem(
-        503,
-        "Audit unavailable",
-        "Audit retrieval is not configured.",
+  server.get(
+    "/v1/audit-events",
+    {
+      schema: {
+        tags: ["audit-events"],
+        summary: "Read a verified audit-chain page",
+        security: [{ sessionCookie: [] }],
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            afterSequence: { type: "integer", minimum: 0, default: 0 },
+            limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.listAuditEvents)
+        throw new ApiProblem(
+          503,
+          "Audit unavailable",
+          "Audit retrieval is not configured.",
+        );
+      const query = request.query as {
+        afterSequence?: string;
+        limit?: string;
+      };
+      const afterSequence = Number(query.afterSequence ?? 0);
+      const limit = Number(query.limit ?? 50);
+      if (!Number.isSafeInteger(afterSequence) || afterSequence < 0)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "afterSequence must be a non-negative integer",
+        );
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "limit must be between 1 and 100",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.audit.read",
+      });
+      return reply.header("cache-control", "no-store").send(
+        await dependencies.listAuditEvents(identity, {
+          afterSequence,
+          limit,
+        }),
       );
-    const query = request.query as {
-      afterSequence?: string;
-      limit?: string;
-    };
-    const afterSequence = Number(query.afterSequence ?? 0);
-    const limit = Number(query.limit ?? 50);
-    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "afterSequence must be a non-negative integer",
-      );
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100)
-      throw new ApiProblem(
-        400,
-        "Invalid request",
-        "limit must be between 1 and 100",
-      );
-    await dependencies.authorizeIdentity?.(identity, {
-      category: "household-instructions",
-      action: "approve",
-      purpose: "vault.audit.read",
-    });
-    return reply.header("cache-control", "no-store").send(
-      await dependencies.listAuditEvents(identity, {
-        afterSequence,
-        limit,
-      }),
-    );
-  });
+    },
+  );
 
   server.post("/v1/documents", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);
@@ -1497,6 +1547,19 @@ export async function registerVaultRoutes(
 
   server.get<{ Params: { id: string } }>(
     "/v1/exports/:id",
+    {
+      schema: {
+        tags: ["exports"],
+        summary: "Read portable export status and bounded download metadata",
+        security: [{ sessionCookie: [] }],
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1525,6 +1588,19 @@ export async function registerVaultRoutes(
 
   server.get<{ Params: { id: string } }>(
     "/v1/reports/:id",
+    {
+      schema: {
+        tags: ["reports"],
+        summary: "Read authorized report status or completed payload",
+        security: [{ sessionCookie: [] }],
+        params: {
+          type: "object",
+          additionalProperties: false,
+          required: ["id"],
+          properties: { id: { type: "string", format: "uuid" } },
+        },
+      },
+    },
     async (request, reply) => {
       const identity = await dependencies.resolveIdentity(request);
       if (!uuidPattern.test(request.params.id))
@@ -1628,21 +1704,31 @@ export async function registerVaultRoutes(
     }
   });
 
-  server.get("/v1/billing/subscription", async (request, reply) => {
-    const identity = await dependencies.resolveIdentity(request);
-    if (!dependencies.getSubscription)
-      throw new ApiProblem(
-        503,
-        "Billing unavailable",
-        "Subscription retrieval is not configured.",
-      );
-    await dependencies.authorizeIdentity?.(identity, {
-      category: "household-instructions",
-      action: "approve",
-      purpose: "vault.billing.read",
-    });
-    return reply
-      .header("cache-control", "no-store")
-      .send(await dependencies.getSubscription(identity));
-  });
+  server.get(
+    "/v1/billing/subscription",
+    {
+      schema: {
+        tags: ["billing"],
+        summary: "Read authoritative subscription status",
+        security: [{ sessionCookie: [] }],
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.getSubscription)
+        throw new ApiProblem(
+          503,
+          "Billing unavailable",
+          "Subscription retrieval is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "approve",
+        purpose: "vault.billing.read",
+      });
+      return reply
+        .header("cache-control", "no-store")
+        .send(await dependencies.getSubscription(identity));
+    },
+  );
 }

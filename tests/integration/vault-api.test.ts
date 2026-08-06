@@ -246,6 +246,22 @@ describe("vault API persistence", () => {
       "/v1/billing/subscription",
     ])
       expect(specification.paths).toHaveProperty(path);
+    expect(specification.paths["/v1/audit-events"]).toMatchObject({
+      get: {
+        tags: ["audit-events"],
+        security: [{ sessionCookie: [] }],
+        parameters: expect.arrayContaining([
+          expect.objectContaining({ name: "limit", in: "query" }),
+        ]),
+      },
+    });
+    expect(specification.paths["/v1/exports/{id}"]).toMatchObject({
+      get: {
+        parameters: [
+          expect.objectContaining({ name: "id", in: "path", required: true }),
+        ],
+      },
+    });
   });
 
   it("returns no-store category-scoped facts and secret-free document metadata", async () => {
