@@ -94,6 +94,8 @@ export interface VaultDocumentSummary {
   expiresAt?: string;
   uploadedAt?: string;
   processedAt?: string;
+  deleteOriginalAfterProcessing: boolean;
+  originalDeletedAt?: string;
   version: number;
 }
 export interface StartedReport {
@@ -136,6 +138,8 @@ export interface DocumentUploadRecord {
   wrappedDataKey: unknown;
   maximumBytes: number;
   version: number;
+  deleteOriginalAfterProcessing: boolean;
+  originalDeletedAt: string | null;
 }
 export interface StartedDocumentProcessing {
   document: { id: string; status: string; version: number };
@@ -385,9 +389,11 @@ export class VaultRepository {
         expires_at: Date | null;
         uploaded_at: Date | null;
         processed_at: Date | null;
+        delete_original_after_processing: boolean;
+        original_deleted_at: Date | null;
         version: number;
       }>(
-        "select id,media_type,status,expires_at,uploaded_at,processed_at,version from documents where status<>'deleted' order by uploaded_at desc nulls last,id",
+        "select id,media_type,status,expires_at,uploaded_at,processed_at,delete_original_after_processing,original_deleted_at,version from documents where status<>'deleted' order by uploaded_at desc nulls last,id",
       );
       return result.rows.map((document) => ({
         id: document.id,
@@ -401,6 +407,11 @@ export class VaultRepository {
           : {}),
         ...(document.processed_at
           ? { processedAt: document.processed_at.toISOString() }
+          : {}),
+        deleteOriginalAfterProcessing:
+          document.delete_original_after_processing,
+        ...(document.original_deleted_at
+          ? { originalDeletedAt: document.original_deleted_at.toISOString() }
           : {}),
         version: document.version,
       }));
@@ -848,6 +859,9 @@ export class VaultRepository {
       maximumBytes: number;
       idempotencyKey: string;
       expiresAt?: string;
+      documentConsentPolicyVersion: string;
+      deleteOriginalAfterProcessing: boolean;
+      consentedAt: string;
     },
   ): Promise<DocumentUploadRecord> {
     return this.withTenant(context, async (client) => {
@@ -858,6 +872,8 @@ export class VaultRepository {
             mediaType: input.mediaType,
             maximumBytes: input.maximumBytes,
             expiresAt: input.expiresAt ?? null,
+            documentConsentPolicyVersion: input.documentConsentPolicyVersion,
+            deleteOriginalAfterProcessing: input.deleteOriginalAfterProcessing,
           }),
         )
         .digest("hex");
@@ -886,7 +902,7 @@ export class VaultRepository {
         documentId = replayId;
       } else {
         await client.query(
-          "insert into documents(id,organization_id,household_id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,expires_at) values ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10)",
+          "insert into documents(id,organization_id,household_id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,expires_at,delete_original_after_processing) values ($1,$2,$3,$4,$5,$6,'pending',$7,$8,$9,$10,$11)",
           [
             input.id,
             context.organizationId,
@@ -898,6 +914,19 @@ export class VaultRepository {
             JSON.stringify(input.wrappedDataKey),
             input.maximumBytes,
             input.expiresAt ?? null,
+            input.deleteOriginalAfterProcessing,
+          ],
+        );
+        await client.query(
+          "insert into document_consents(id,organization_id,household_id,document_id,person_id,policy_version,granted_at) values ($1,$2,$3,$4,$5,$6,$7)",
+          [
+            randomUUID(),
+            context.organizationId,
+            context.householdId,
+            input.id,
+            context.actorId,
+            input.documentConsentPolicyVersion,
+            input.consentedAt,
           ],
         );
         await client.query(
@@ -920,8 +949,10 @@ export class VaultRepository {
         wrapped_data_key: unknown;
         maximum_bytes: string;
         version: number;
+        delete_original_after_processing: boolean;
+        original_deleted_at: Date | null;
       }>(
-        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version from documents where id=$1",
+        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version,delete_original_after_processing,original_deleted_at from documents where id=$1",
         [documentId],
       );
       const row = result.rows[0];
@@ -937,6 +968,8 @@ export class VaultRepository {
         wrappedDataKey: row.wrapped_data_key,
         maximumBytes: Number(row.maximum_bytes),
         version: row.version,
+        deleteOriginalAfterProcessing: row.delete_original_after_processing,
+        originalDeletedAt: row.original_deleted_at?.toISOString() ?? null,
       };
     });
   }
@@ -956,8 +989,10 @@ export class VaultRepository {
         wrapped_data_key: unknown;
         maximum_bytes: string;
         version: number;
+        delete_original_after_processing: boolean;
+        original_deleted_at: Date | null;
       }>(
-        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version from documents where id=$1 and status='pending'",
+        "select id,object_key,original_sha256,media_type,status,encryption_key_version,wrapped_data_key,maximum_bytes,version,delete_original_after_processing,original_deleted_at from documents where id=$1 and status='pending'",
         [documentId],
       );
       const row = result.rows[0];
@@ -973,6 +1008,8 @@ export class VaultRepository {
         wrappedDataKey: row.wrapped_data_key,
         maximumBytes: Number(row.maximum_bytes),
         version: row.version,
+        deleteOriginalAfterProcessing: row.delete_original_after_processing,
+        originalDeletedAt: row.original_deleted_at?.toISOString() ?? null,
       };
     });
   }
@@ -1079,12 +1116,14 @@ export class VaultRepository {
         wrapped_data_key: unknown;
         maximum_bytes: string;
         version: number;
+        delete_original_after_processing: boolean;
+        original_deleted_at: Date | null;
         workflow_id: string;
         workflow_status: string;
         workflow_version: number;
         next_step: string | null;
       }>(
-        "select d.id,d.object_key,d.original_sha256,d.media_type,d.status,d.encryption_key_version,d.wrapped_data_key,d.maximum_bytes,d.version,w.id as workflow_id,w.status as workflow_status,w.version as workflow_version,w.next_step from documents d join workflow_runs w on w.subject_type='Document' and w.subject_id=d.id where w.id=$1",
+        "select d.id,d.object_key,d.original_sha256,d.media_type,d.status,d.encryption_key_version,d.wrapped_data_key,d.maximum_bytes,d.version,d.delete_original_after_processing,d.original_deleted_at,w.id as workflow_id,w.status as workflow_status,w.version as workflow_version,w.next_step from documents d join workflow_runs w on w.subject_type='Document' and w.subject_id=d.id where w.id=$1",
         [workflowId],
       );
       const row = result.rows[0];
@@ -1100,6 +1139,8 @@ export class VaultRepository {
         wrappedDataKey: row.wrapped_data_key,
         maximumBytes: Number(row.maximum_bytes),
         version: row.version,
+        deleteOriginalAfterProcessing: row.delete_original_after_processing,
+        originalDeletedAt: row.original_deleted_at?.toISOString() ?? null,
         workflowId: row.workflow_id,
         workflowStatus: row.workflow_status,
         workflowVersion: row.workflow_version,
@@ -1206,11 +1247,35 @@ export class VaultRepository {
       if (derivative.rowCount !== 1)
         throw new Error("document OCR derivative conflict");
       const workflow = await client.query(
-        "update workflow_runs set status='running',completed_steps=case when completed_steps ? 'ocr' then completed_steps else completed_steps || '[\"ocr\"]'::jsonb end,next_step='classification',last_error_class=null,version=version+1 where id=$1 and version=$2 and next_step='ocr'",
-        [input.workflowId, input.workflowVersion],
+        "update workflow_runs set status='running',completed_steps=case when completed_steps ? 'ocr' then completed_steps else completed_steps || '[\"ocr\"]'::jsonb end,next_step=case when (select delete_original_after_processing from documents where id=$3) then 'delete-original' else 'classification' end,last_error_class=null,version=version+1 where id=$1 and version=$2 and next_step='ocr'",
+        [input.workflowId, input.workflowVersion, input.documentId],
       );
       if (workflow.rowCount !== 1)
         throw new Error("document OCR workflow conflict");
+    });
+  }
+
+  async completeDocumentOriginalDeletion(
+    context: TenantContext,
+    input: { documentId: string; workflowId: string; deletedAt: string },
+  ): Promise<void> {
+    await this.withTenant(context, async (client) => {
+      await client.query(
+        "update documents set original_deleted_at=coalesce(original_deleted_at,$1),version=case when original_deleted_at is null then version+1 else version end where id=$2 and delete_original_after_processing=true",
+        [input.deletedAt, input.documentId],
+      );
+      const workflow = await client.query(
+        "update workflow_runs set status='running',completed_steps=case when completed_steps ? 'delete-original' then completed_steps else completed_steps || '[\"delete-original\"]'::jsonb end,next_step='classification',last_error_class=null,version=version+1 where id=$1 and next_step='delete-original'",
+        [input.workflowId],
+      );
+      if (workflow.rowCount !== 1) {
+        const completed = await client.query(
+          "select 1 from workflow_runs where id=$1 and completed_steps ? 'delete-original'",
+          [input.workflowId],
+        );
+        if (completed.rowCount !== 1)
+          throw new Error("document original deletion conflict");
+      }
     });
   }
 

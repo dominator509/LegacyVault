@@ -85,6 +85,8 @@ export interface ServerDependencies {
       mediaType: string;
       maximumBytes: number;
       expiresAt?: string;
+      documentConsentPolicyVersion: string;
+      deleteOriginalAfterProcessing: boolean;
     },
   ) => Promise<{
     document: { id: string; status: string; version: number };

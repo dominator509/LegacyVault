@@ -181,6 +181,10 @@ export interface DocumentProcessingRepository {
       createdAt: string;
     },
   ): Promise<void>;
+  completeDocumentOriginalDeletion(
+    context: TenantContext,
+    input: { documentId: string; workflowId: string; deletedAt: string },
+  ): Promise<void>;
 }
 
 export interface DocumentOcrObjectStore extends QuarantineObjectStore {
@@ -189,6 +193,7 @@ export interface DocumentOcrObjectStore extends QuarantineObjectStore {
     ciphertext: Uint8Array;
     checksumSha256Base64: string;
   }): Promise<void>;
+  deleteObject(objectKey: string): Promise<void>;
 }
 
 export interface DocumentOcrAdapter {
@@ -690,6 +695,15 @@ export function createDocumentOcrWorkflowHandler(input: {
         context,
         data.workflowId,
       );
+      if (document.nextStep === "delete-original") {
+        await input.objectStore.deleteObject(document.objectKey);
+        await input.repository.completeDocumentOriginalDeletion(context, {
+          documentId: document.id,
+          workflowId: document.workflowId,
+          deletedAt: new Date().toISOString(),
+        });
+        return;
+      }
       if (document.nextStep !== "ocr") return;
       if (document.status !== "clean")
         throw new Error("document has not passed malware scanning");
@@ -765,6 +779,14 @@ export function createDocumentOcrWorkflowHandler(input: {
           encryptionKeyVersion: document.encryptionKeyVersion,
           createdAt: new Date().toISOString(),
         });
+        if (document.deleteOriginalAfterProcessing) {
+          await input.objectStore.deleteObject(document.objectKey);
+          await input.repository.completeDocumentOriginalDeletion(context, {
+            documentId: document.id,
+            workflowId: document.workflowId,
+            deletedAt: new Date().toISOString(),
+          });
+        }
       } finally {
         encryptedDerivative.fill(0);
       }

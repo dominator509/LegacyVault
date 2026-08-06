@@ -237,3 +237,9 @@
 2026-08-06T03:15:26Z | codex | EP-004 | HYPOTHESIS | clear_the_active_confirmed_by_and_confirmed_at_markers_when_transitioning_a_confirmed_fact_to_disputed
 2026-08-06T03:15:26Z | codex | EP-004 | HEARTBEAT | persisted_category_authorized_idempotent_optimistic_candidate_rejection_and_confirmed_dispute_replay_focused_API_15_type_security_ok
 2026-08-06T03:17:34Z | codex | EP-004 | HEARTBEAT | fact_lifecycle_checkpoint_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok
+2026-08-06T03:26:23Z | codex | EP-004 | SIG | first_document_privacy_type_TS2739_two_upload_read_models_missing_new_fields_and_TS2339_processing_query_type_missing_columns_after_migration_format_security_ok
+2026-08-06T03:26:23Z | codex | EP-004 | HYPOTHESIS | select_and_map_the_new_deletion_fields_in_each_existing_document_read_model_and_declare_the_processing_query_columns
+2026-08-06T03:26:23Z | codex | EP-004 | SIG | document_privacy_runtime_pipeline_manual_extraction_conflict_after_new_delete_original_step_incremented_workflow_version
+2026-08-06T03:26:23Z | codex | EP-004 | HYPOTHESIS | advance_the_existing_optimistic_manual_extraction_fixture_from_version_3_to_4_without_weakening_the_version_check
+2026-08-06T03:26:23Z | codex | EP-004 | HEARTBEAT | document_specific_RLS_consent_explicit_retention_choice_derivative_before_retryable_original_deletion_real_PostgreSQL_MinIO_ClamAV_OCR_pipeline_focused_17_tests_type_security_ok
+2026-08-06T03:28:37Z | codex | EP-004 | HEARTBEAT | document_privacy_checkpoint_migration_unit_41_integration_55_e2e_2_live_fire_2_format_lint_type_build_security_dependency_audit_smoke_ok

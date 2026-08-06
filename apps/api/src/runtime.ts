@@ -526,6 +526,9 @@ export function createApplicationRuntime(environment: Environment): {
             encryptionKeyVersion: householdKey.keyVersion,
             maximumBytes: input.maximumBytes,
             idempotencyKey: input.idempotencyKey,
+            documentConsentPolicyVersion: input.documentConsentPolicyVersion,
+            deleteOriginalAfterProcessing: input.deleteOriginalAfterProcessing,
+            consentedAt: new Date().toISOString(),
             ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
           });
           const returnedKey =

@@ -675,6 +675,20 @@ describe("vault API persistence", () => {
 
   it("normalizes document expiration timestamps and rejects missing timezones", async () => {
     const digest = "a".repeat(64);
+    const missingConsent = await server.inject({
+      method: "POST",
+      url: "/v1/documents",
+      headers: { "idempotency-key": `document-${randomUUID()}` },
+      payload: {
+        originalSha256: digest,
+        mediaType: "application/pdf",
+        maximumBytes: 1024,
+      },
+    });
+    expect(missingConsent.statusCode).toBe(400);
+    expect(missingConsent.json()).toMatchObject({
+      detail: "documentConsentPolicyVersion is required",
+    });
     const invalid = await server.inject({
       method: "POST",
       url: "/v1/documents",
@@ -684,6 +698,8 @@ describe("vault API persistence", () => {
         mediaType: "application/pdf",
         maximumBytes: 1024,
         expiresAt: "2026-08-20T00:00:00",
+        documentConsentPolicyVersion: "document-processing-v1",
+        deleteOriginalAfterProcessing: false,
       },
     });
     expect(invalid.statusCode).toBe(400);
@@ -700,12 +716,16 @@ describe("vault API persistence", () => {
         mediaType: "application/pdf",
         maximumBytes: 1024,
         expiresAt: "2026-08-19T17:00:00-07:00",
+        documentConsentPolicyVersion: "document-processing-v1",
+        deleteOriginalAfterProcessing: true,
       },
     });
     expect(created.statusCode).toBe(201);
     expect(created.headers["cache-control"]).toBe("no-store");
     expect(observedDocumentUpload).toMatchObject({
       expiresAt: "2026-08-20T00:00:00.000Z",
+      documentConsentPolicyVersion: "document-processing-v1",
+      deleteOriginalAfterProcessing: true,
     });
   });
 

@@ -174,6 +174,8 @@ export async function registerVaultRoutes(
         mediaType: string;
         maximumBytes: number;
         expiresAt?: string;
+        documentConsentPolicyVersion: string;
+        deleteOriginalAfterProcessing: boolean;
       },
     ) => Promise<unknown>;
     createDocumentUploadUrl?: (
@@ -443,6 +445,22 @@ export async function registerVaultRoutes(
     )
       throw new ApiProblem(400, "Invalid request", "mediaType is invalid");
     const maximumBytes = requiredPositiveInteger(body, "maximumBytes");
+    const documentConsentPolicyVersion = requiredString(
+      body,
+      "documentConsentPolicyVersion",
+    );
+    if (documentConsentPolicyVersion.length > 120)
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "documentConsentPolicyVersion is too large",
+      );
+    if (typeof body.deleteOriginalAfterProcessing !== "boolean")
+      throw new ApiProblem(
+        400,
+        "Invalid request",
+        "deleteOriginalAfterProcessing must be boolean",
+      );
     if (maximumBytes > 100 * 1024 * 1024)
       throw new ApiProblem(
         400,
@@ -487,6 +505,8 @@ export async function registerVaultRoutes(
       originalSha256,
       mediaType,
       maximumBytes,
+      documentConsentPolicyVersion,
+      deleteOriginalAfterProcessing: body.deleteOriginalAfterProcessing,
       ...(expiresAt ? { expiresAt } : {}),
     });
     return reply.header("cache-control", "no-store").code(201).send(started);

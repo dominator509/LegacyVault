@@ -95,10 +95,26 @@ export const documents = pgTable(
     processedAt: timestamp("processed_at", { withTimezone: true }),
     lastErrorClass: text("last_error_class"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    deleteOriginalAfterProcessing: boolean(
+      "delete_original_after_processing",
+    ).notNull(),
+    originalDeletedAt: timestamp("original_deleted_at", {
+      withTimezone: true,
+    }),
     ...versioned,
   },
   (table) => [uniqueIndex("documents_object_key_unique").on(table.objectKey)],
 );
+export const documentConsents = pgTable("document_consents", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  documentId: uuid("document_id").notNull(),
+  personId: uuid("person_id").notNull(),
+  policyVersion: text("policy_version").notNull(),
+  grantedAt: timestamp("granted_at", { withTimezone: true }).notNull(),
+  withdrawnAt: timestamp("withdrawn_at", { withTimezone: true }),
+  ...versioned,
+});
 export const evidence = pgTable("evidence", {
   id: uuid("id").primaryKey(),
   ...tenant,

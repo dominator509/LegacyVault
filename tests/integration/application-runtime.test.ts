@@ -404,6 +404,8 @@ describe("composed application runtime", () => {
           mediaType: "image/png",
           maximumBytes: 1024 * 1024,
           expiresAt: documentExpiresAt,
+          documentConsentPolicyVersion: "document-processing-v1",
+          deleteOriginalAfterProcessing: true,
         },
       );
       expect(documentUpload?.encryption.algorithm).toBe("A256GCM");
@@ -417,6 +419,8 @@ describe("composed application runtime", () => {
           mediaType: "image/png",
           maximumBytes: 1024 * 1024,
           expiresAt: documentExpiresAt,
+          documentConsentPolicyVersion: "document-processing-v1",
+          deleteOriginalAfterProcessing: true,
         },
       );
       expect(replayedDocument).toEqual(documentUpload);
@@ -582,8 +586,11 @@ describe("composed application runtime", () => {
           ciphertext_sha256: string;
           next_step: string;
           workflow_status: string;
+          original_deleted_at: Date;
+          delete_original_after_processing: boolean;
+          consent_policy_version: string;
         }>(
-          "select dd.id,dd.object_key,dd.ciphertext_sha256,w.next_step,w.status as workflow_status from document_derivatives dd join workflow_runs w on w.subject_id=dd.document_id where dd.document_id=$1",
+          "select dd.id,dd.object_key,dd.ciphertext_sha256,w.next_step,w.status as workflow_status,d.original_deleted_at,d.delete_original_after_processing,dc.policy_version as consent_policy_version from document_derivatives dd join workflow_runs w on w.subject_id=dd.document_id join documents d on d.id=dd.document_id join document_consents dc on dc.document_id=d.id where dd.document_id=$1",
           [documentUpload?.document.id],
         );
         await client.query("commit");
@@ -591,7 +598,13 @@ describe("composed application runtime", () => {
           id: documentUpload?.document.id,
           next_step: "classification",
           workflow_status: "running",
+          delete_original_after_processing: true,
+          consent_policy_version: "document-processing-v1",
         });
+        expect(derivative.rows[0]?.original_deleted_at).toBeInstanceOf(Date);
+        await expect(
+          scanObjectStore.getCiphertext(persistedDocument.objectKey),
+        ).rejects.toBeDefined();
         const encryptedSearchablePdf = await scanObjectStore.getCiphertext(
           derivative.rows[0]?.object_key ?? "",
         );
@@ -616,7 +629,7 @@ describe("composed application runtime", () => {
         const extractionInput = {
           documentId: documentUpload?.document.id ?? "",
           workflowId: documentProcessing?.workflow.id ?? "",
-          expectedWorkflowVersion: 3,
+          expectedWorkflowVersion: 4,
           idempotencyKey: extractionKey,
           candidates: [
             {
@@ -653,6 +666,8 @@ describe("composed application runtime", () => {
             mediaType: "image/png",
             status: "clean",
             expiresAt: documentExpiresAt,
+            deleteOriginalAfterProcessing: true,
+            originalDeletedAt: expect.any(String),
           }),
         ]);
         expect(JSON.stringify(listedDocuments)).not.toContain("objectKey");
@@ -707,7 +722,6 @@ describe("composed application runtime", () => {
         await scanObjectStore.deleteObject(
           derivative.rows[0]?.object_key ?? "",
         );
-        await scanObjectStore.deleteObject(persistedDocument.objectKey);
       } finally {
         await scanKeyStore.close();
       }
