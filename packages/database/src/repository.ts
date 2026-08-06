@@ -2344,7 +2344,7 @@ export class VaultRepository {
       status: string;
       version: number;
     };
-    workflow?: { id: string; status: string; version: number };
+    workflow: { id: string; status: string; version: number };
   }> {
     if (input.personId !== context.actorId)
       throw new Error(
@@ -2383,7 +2383,7 @@ export class VaultRepository {
             status: string;
             version: number;
           };
-          workflow?: { id: string; status: string; version: number };
+          workflow: { id: string; status: string; version: number };
         };
       }
 
@@ -2407,32 +2407,25 @@ export class VaultRepository {
       const privacyRequest = privacyResult.rows[0];
       if (!privacyRequest)
         throw new Error("privacy request insert returned no row");
-      let workflow: { id: string; status: string; version: number } | undefined;
-      if (input.kind === "export" || input.kind === "deletion") {
-        const workflowId = randomUUID();
-        const workflowResult = await client.query<{
-          id: string;
-          status: string;
-          version: number;
-        }>(
-          "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,$4,$5,'pending','[]','identity-verification','PrivacyRequest',$6) returning id,status,version",
-          [
-            workflowId,
-            context.organizationId,
-            context.householdId,
-            input.kind,
-            `privacy:${privacyId}`,
-            privacyId,
-          ],
-        );
-        workflow = workflowResult.rows[0];
-        if (!workflow)
-          throw new Error("privacy workflow insert returned no row");
-      }
-      const response = {
-        privacyRequest,
-        ...(workflow ? { workflow } : {}),
-      };
+      const workflowId = randomUUID();
+      const workflowResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,$4,$5,'pending','[]','identity-verification','PrivacyRequest',$6) returning id,status,version",
+        [
+          workflowId,
+          context.organizationId,
+          context.householdId,
+          input.kind,
+          `privacy:${privacyId}`,
+          privacyId,
+        ],
+      );
+      const workflow = workflowResult.rows[0];
+      if (!workflow) throw new Error("privacy workflow insert returned no row");
+      const response = { privacyRequest, workflow };
       await client.query(
         "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
         [
@@ -2443,6 +2436,58 @@ export class VaultRepository {
         ],
       );
       return response;
+    });
+  }
+
+  async listPrivacyRequests(context: TenantContext): Promise<
+    readonly {
+      id: string;
+      kind: PrivacyRequestKind;
+      status: string;
+      requestedAt: string;
+      verifiedAt: string | null;
+      recoveryUntil: string | null;
+      completedAt: string | null;
+      version: number;
+      workflow: {
+        status: string;
+        nextStep: string | null;
+        version: number;
+      };
+    }[]
+  > {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        id: string;
+        kind: PrivacyRequestKind;
+        status: string;
+        requested_at: Date;
+        verified_at: Date | null;
+        recovery_until: Date | null;
+        completed_at: Date | null;
+        version: number;
+        workflow_status: string;
+        next_step: string | null;
+        workflow_version: number;
+      }>(
+        "select pr.id,pr.kind,pr.status,pr.requested_at,pr.verified_at,pr.recovery_until,pr.completed_at,pr.version,w.status as workflow_status,w.next_step,w.version as workflow_version from privacy_requests pr join workflow_runs w on w.subject_type='PrivacyRequest' and w.subject_id=pr.id where pr.person_id=$1 order by pr.requested_at desc,pr.id desc limit 100",
+        [context.actorId],
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        kind: row.kind,
+        status: row.status,
+        requestedAt: row.requested_at.toISOString(),
+        verifiedAt: row.verified_at?.toISOString() ?? null,
+        recoveryUntil: row.recovery_until?.toISOString() ?? null,
+        completedAt: row.completed_at?.toISOString() ?? null,
+        version: row.version,
+        workflow: {
+          status: row.workflow_status,
+          nextStep: row.next_step,
+          version: row.workflow_version,
+        },
+      }));
     });
   }
 

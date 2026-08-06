@@ -1045,6 +1045,56 @@ describe("vault API persistence", () => {
     });
   });
 
+  it("tracks non-deletion privacy rights in the self-scoped request ledger", async () => {
+    const created = await server.inject({
+      method: "POST",
+      url: "/v1/privacy-requests",
+      headers: {
+        "idempotency-key": `privacy-correction-${randomUUID()}`,
+        "if-match": "0",
+      },
+      payload: { personId: identity.actorId, kind: "correction" },
+    });
+    expect(created.statusCode).toBe(202);
+    expect(created.json()).toMatchObject({
+      privacyRequest: {
+        kind: "correction",
+        status: "identity-verification",
+        version: 1,
+      },
+      workflow: {
+        status: "pending",
+        version: 1,
+      },
+    });
+    const listed = await server.inject({
+      method: "GET",
+      url: "/v1/privacy-requests",
+    });
+    expect(listed.statusCode).toBe(200);
+    expect(listed.headers["cache-control"]).toBe("no-store");
+    expect(listed.json()).toMatchObject({
+      requests: expect.arrayContaining([
+        expect.objectContaining({
+          id: created.json<{ privacyRequest: { id: string } }>().privacyRequest
+            .id,
+          kind: "correction",
+          status: "identity-verification",
+          workflow: {
+            status: "pending",
+            nextStep: "identity-verification",
+            version: 1,
+          },
+        }),
+      ]),
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "household-instructions",
+      action: "read",
+      purpose: "vault.privacy-request.read",
+    });
+  });
+
   it("records versioned Terms consent and withdraws it idempotently", async () => {
     const personId = randomUUID();
     const client = createDatabaseClient(databaseUrl);

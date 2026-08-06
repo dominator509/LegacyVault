@@ -1984,6 +1984,115 @@ export async function registerVaultRoutes(
     },
   );
 
+  server.get(
+    "/v1/privacy-requests",
+    {
+      schema: {
+        tags: ["privacy"],
+        summary: "List the authenticated data subject's privacy requests",
+        security: [{ sessionCookie: [] }],
+        response: {
+          200: {
+            description: "Bounded privacy request and workflow status",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["requests"],
+                  properties: {
+                    requests: {
+                      type: "array",
+                      maxItems: 100,
+                      items: {
+                        type: "object",
+                        additionalProperties: false,
+                        required: [
+                          "id",
+                          "kind",
+                          "status",
+                          "requestedAt",
+                          "verifiedAt",
+                          "recoveryUntil",
+                          "completedAt",
+                          "version",
+                          "workflow",
+                        ],
+                        properties: {
+                          id: { type: "string", format: "uuid" },
+                          kind: {
+                            type: "string",
+                            enum: [
+                              "access",
+                              "correction",
+                              "export",
+                              "deletion",
+                              "appeal",
+                            ],
+                          },
+                          status: { type: "string", minLength: 1 },
+                          requestedAt: {
+                            type: "string",
+                            format: "date-time",
+                          },
+                          verifiedAt: {
+                            anyOf: [
+                              { type: "string", format: "date-time" },
+                              { type: "null" },
+                            ],
+                          },
+                          recoveryUntil: {
+                            anyOf: [
+                              { type: "string", format: "date-time" },
+                              { type: "null" },
+                            ],
+                          },
+                          completedAt: {
+                            anyOf: [
+                              { type: "string", format: "date-time" },
+                              { type: "null" },
+                            ],
+                          },
+                          version: { type: "integer", minimum: 1 },
+                          workflow: {
+                            type: "object",
+                            additionalProperties: false,
+                            required: ["status", "nextStep", "version"],
+                            properties: {
+                              status: { type: "string", minLength: 1 },
+                              nextStep: {
+                                anyOf: [
+                                  { type: "string", minLength: 1 },
+                                  { type: "null" },
+                                ],
+                              },
+                              version: { type: "integer", minimum: 1 },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "read",
+        purpose: "vault.privacy-request.read",
+      });
+      return reply.header("cache-control", "no-store").send({
+        requests: await dependencies.repository.listPrivacyRequests(identity),
+      });
+    },
+  );
+
   server.post(
     "/v1/privacy-requests",
     {
