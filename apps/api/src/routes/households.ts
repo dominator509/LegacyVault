@@ -269,7 +269,54 @@ export async function registerHouseholdRoutes(
         tags: ["households"],
         summary: "List households accessible to the authenticated account",
         security: [{ sessionCookie: [] }],
-        response: standardProblemResponses,
+        response: {
+          200: {
+            description: "Authenticated account household memberships",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["households"],
+                  properties: {
+                    households: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        additionalProperties: false,
+                        required: [
+                          "id",
+                          "organizationId",
+                          "name",
+                          "version",
+                          "membershipId",
+                          "personId",
+                          "role",
+                        ],
+                        properties: {
+                          id: { type: "string", format: "uuid" },
+                          organizationId: {
+                            type: "string",
+                            format: "uuid",
+                          },
+                          name: { type: "string" },
+                          version: { type: "integer", minimum: 1 },
+                          membershipId: {
+                            type: "string",
+                            format: "uuid",
+                          },
+                          personId: { type: "string", format: "uuid" },
+                          role: { type: "string" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...standardProblemResponses,
+        },
       },
     },
     async (request, reply) => {

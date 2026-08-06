@@ -336,3 +336,11 @@
 2026-08-06T08:44:29Z | codex | EP-005 | LEASE | explicit-implementation-continuation-ADR-009-ADR-063
 2026-08-06T09:44:28Z | codex | EP-005 | CORRECTION | manual_duplicate_lease_event_08_44_14_is_non_authoritative_actual_script_lease_08_44_29_remains_authoritative
 2026-08-06T09:44:29Z | codex | EP-005 | HEARTBEAT | pinned_Next16_route_BFF_Playwright_accessibility_guides_read_public_handlers_validate_auth_origin_payload_timeout_no_sensitive_response_headers
+2026-08-06T10:05:16Z | codex | EP-005 | LEASE_RELEASE | self_identity_contract_defect_requires_bounded_EP004_correction_then_EP005_resume
+2026-08-06T10:05:16Z | codex | EP-004 | LEASE | self_identity_household_summary_contract_correction_for_EP005_consent_privacy_flows
+2026-08-06T10:11:33Z | codex | EP-004 | SIG | focused_identity_gate_exposed_EP005_export_cleanup_TS2322_and_fixture_actor_mismatch_assertion_exit_1
+2026-08-06T10:11:34Z | codex | EP-004 | HYPOTHESIS | make_export_cleanup_return_void_and_assert_the_new_household_membership_UUID_instead_of_the_preexisting_fixture_actor
+2026-08-06T10:11:34Z | codex | EP-004 | SIG | format_gate_found_four_unformatted_new_EP005_client_files_exit_1
+2026-08-06T10:11:34Z | codex | EP-004 | HYPOTHESIS | run_the_authorized_repository_formatter_then_rerun_the_exact_format_gate
+2026-08-06T10:11:34Z | codex | EP-004 | HEARTBEAT | account_scoped_household_summary_returns_only_callers_personId_OpenAPI_schema_typecheck_integration_69_security_format_ok_ADR066
+2026-08-06T10:11:34Z | codex | EP-004 | LEASE_RELEASE | self_identity_contract_checkpoint_complete_exact_node_verify_still_deferred_EXT005

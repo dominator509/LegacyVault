@@ -37,6 +37,7 @@ export interface HouseholdMembershipSummary {
   name: string;
   version: number;
   membershipId: string;
+  personId: string;
   role: Role;
 }
 export interface EncryptedHouseholdMember {
@@ -456,9 +457,10 @@ export class VaultRepository {
         name: string;
         version: number;
         membership_id: string;
+        person_id: string;
         role: Role;
       }>(
-        "select h.id,h.organization_id,h.name,h.version,m.id as membership_id,m.role from memberships m join households h on h.id=m.household_id and h.organization_id=m.organization_id where m.auth_user_id=$1 and m.active=1 order by h.name,h.id",
+        "select h.id,h.organization_id,h.name,h.version,m.id as membership_id,m.person_id,m.role from memberships m join households h on h.id=m.household_id and h.organization_id=m.organization_id where m.auth_user_id=$1 and m.active=1 order by h.name,h.id",
         [context.authUserId],
       );
       return result.rows.map((row) => ({
@@ -467,6 +469,7 @@ export class VaultRepository {
         name: row.name,
         version: row.version,
         membershipId: row.membership_id,
+        personId: row.person_id,
         role: row.role,
       }));
     });
