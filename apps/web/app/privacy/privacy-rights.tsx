@@ -2,6 +2,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   apiRequest,
+  currentPersonId,
   errorMessage,
   mutationHeaders,
   verifyTotpStepUp,
@@ -45,15 +46,16 @@ export function PrivacyRights() {
     setBusy(true);
     setError("");
     setSuccess("");
-    const data = new FormData(e.currentTarget);
     try {
+      const personId = await currentPersonId();
+      const data = new FormData(e.currentTarget);
       const result = await apiRequest<{ privacyRequest: PrivacyRequest }>(
         "/v1/privacy-requests",
         {
           method: "POST",
           headers: mutationHeaders(0),
           body: JSON.stringify({
-            personId: String(data.get("personId")),
+            personId,
             kind: String(data.get("kind")),
           }),
         },
@@ -108,14 +110,6 @@ export function PrivacyRights() {
       <section className="card">
         <h2>Submit a request</h2>
         <form onSubmit={create}>
-          <label>
-            <span>Your person ID</span>
-            <input name="personId" required pattern="[0-9a-fA-F-]{36}" />
-            <span className="field-help">
-              Requests are accepted only when this matches the authenticated
-              data subject.
-            </span>
-          </label>
           <label>
             <span>Request type</span>
             <select name="kind">

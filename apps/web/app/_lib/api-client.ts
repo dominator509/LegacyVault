@@ -21,6 +21,26 @@ function activeHousehold(): string | null {
     : window.localStorage.getItem("legacy-vault.household-id");
 }
 
+let householdSelection: Promise<string | null> | null = null;
+
+async function ensureActiveHousehold(path: string): Promise<string | null> {
+  const selected = activeHousehold();
+  if (selected || path === "/v1/households" || !path.startsWith("/v1/"))
+    return selected;
+  householdSelection ??= apiRequest<{
+    households: Array<{ id: string }>;
+  }>("/v1/households").then(({ households }) => {
+    const next = households[0]?.id ?? null;
+    if (next) window.localStorage.setItem("legacy-vault.household-id", next);
+    return next;
+  });
+  try {
+    return await householdSelection;
+  } finally {
+    householdSelection = null;
+  }
+}
+
 export function mutationHeaders(version: number): HeadersInit {
   return {
     "idempotency-key": `web-${crypto.randomUUID()}`,
@@ -34,7 +54,7 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("accept", "application/json");
-  const householdId = activeHousehold();
+  const householdId = await ensureActiveHousehold(path);
   if (householdId) headers.set("x-household-id", householdId);
   if (init.body && !headers.has("content-type"))
     headers.set("content-type", "application/json");
@@ -62,6 +82,29 @@ export async function apiRequest<T>(
     );
   }
   return payload as T;
+}
+
+interface AccountHouseholdMembership {
+  id: string;
+  personId: string;
+}
+
+export async function currentPersonId(): Promise<string> {
+  const { households } = await apiRequest<{
+    households: AccountHouseholdMembership[];
+  }>("/v1/households");
+  const selectedId = activeHousehold();
+  const membership =
+    households.find((household) => household.id === selectedId) ??
+    households[0];
+  if (!membership)
+    throw new ApiRequestError(
+      "Create or join a household before continuing.",
+      409,
+    );
+  if (membership.id !== selectedId)
+    window.localStorage.setItem("legacy-vault.household-id", membership.id);
+  return membership.personId;
 }
 
 export function errorMessage(error: unknown): string {

@@ -13,10 +13,12 @@ const navigation = [
   ["Vault", "/vault"],
   ["Review", "/review"],
   ["Reports", "/reports"],
+  ["Export", "/exports"],
   ["Members", "/members"],
   ["Emergency access", "/emergency-access"],
   ["Privacy", "/privacy"],
   ["AI settings", "/ai-settings"],
+  ["Billing", "/billing"],
 ] as const;
 
 export default function RootLayout({

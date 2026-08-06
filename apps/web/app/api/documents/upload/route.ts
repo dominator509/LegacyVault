@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
     const origin = request.headers.get("origin");
     if (origin && origin !== request.nextUrl.origin)
       throw new UpstreamProblem(403, "The upload origin is not allowed.");
+    const contentLength = Number(request.headers.get("content-length"));
+    if (Number.isFinite(contentLength) && contentLength > 101 * 1024 * 1024)
+      throw new UpstreamProblem(413, "The upload request is too large.");
     const householdId = request.headers.get("x-household-id");
     if (!householdId)
       throw new UpstreamProblem(

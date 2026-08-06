@@ -353,3 +353,10 @@
 2026-08-06T10:25:58Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
 2026-08-06T10:25:58Z | codex | EP-004 | HEARTBEAT | self_only_consent_create_non_cacheable_active_lookup_versioned_withdrawal_integration_69_contract_39_operations_1727_cases_type_format_security_ok_ADR068
 2026-08-06T10:25:58Z | codex | EP-004 | LEASE_RELEASE | active_consent_contract_checkpoint_complete_exact_node_verify_still_deferred_EXT005
+2026-08-06T10:26:17Z | codex | EP-005 | LEASE | resume_after_reload_safe_self_consent_contract
+2026-08-06T10:34:16Z | codex | EP-005 | SIG | exact_verify_preflight_stopped_on_unavailable_STRIPE_SECRET_KEY_exit_1_after_all_independent_gates_passed
+2026-08-06T10:34:16Z | codex | EP-005 | HYPOTHESIS | preserve_EXT005_release_blocker_and_checkpoint_only_the_fully_verified_independent_client_work
+2026-08-06T10:34:16Z | codex | EP-005 | HEARTBEAT | persisted_self_AI_consent_withdrawal_auto_household_selection_billing_export_encrypted_upload_cookie_proxy_unit_50_integration_69_e2e_5_contract_39_operations_1727_cases_build_18_routes_security_audit_reality_smoke_live_fire_2_ok
+2026-08-06T10:34:17Z | codex | EP-005 | EXTERNAL_DEFERRED | verify_exit_1_preflight_missing_STRIPE_SECRET_KEY_EXT005_authenticated_browser_Turnstile_and_approved_policy_versions_also_release_blocked
+2026-08-06T10:34:17Z | codex | EP-005 | CONTINUATION_PASS | all_locally_possible_M2_gates_pass_no_green_tag_or_NODE_DONE
+2026-08-06T10:34:17Z | codex | EP-005 | LEASE_RELEASE | engineering_checkpoint_complete_exact_node_verify_externally_blocked

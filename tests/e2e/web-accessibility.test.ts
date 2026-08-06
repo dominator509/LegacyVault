@@ -84,7 +84,14 @@ describe("real browser accessibility", () => {
     if (!browser) throw new Error("browser unavailable");
     const context = await browser.newContext();
     const page = await context.newPage();
-    for (const path of ["/", "/sign-in", "/onboarding", "/dashboard"]) {
+    for (const path of [
+      "/",
+      "/sign-in",
+      "/onboarding",
+      "/dashboard",
+      "/billing",
+      "/exports",
+    ]) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: "networkidle" });
       const result = await new AxeBuilder({ page }).analyze();
       expect(

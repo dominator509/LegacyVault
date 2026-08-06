@@ -53,9 +53,12 @@ export async function proxyApiRequest(
     });
     const returnedHeaders = new Headers();
     for (const name of responseHeaders) {
+      if (name === "set-cookie") continue;
       const value = upstream.headers.get(name);
       if (value) returnedHeaders.set(name, value);
     }
+    for (const cookie of upstream.headers.getSetCookie())
+      returnedHeaders.append("set-cookie", cookie);
     returnedHeaders.set("cache-control", "no-store");
     return new Response(upstream.body, {
       status: upstream.status,
