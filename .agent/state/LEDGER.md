@@ -407,3 +407,9 @@
 2026-08-06T12:15:10Z | codex | EP-007 | HYPOTHESIS | assert_the_observed_and_contract_appropriate_202_Accepted_status_then_complete_UI_success_proof
 2026-08-06T12:18:05Z | codex | EP-007 | MILESTONE_PASS | M1_install_ok_lint_ok_typecheck_ok
 2026-08-06T12:18:09Z | codex | EP-007 | HEARTBEAT | pinned_k6_2.0.0_digest_50_VUs_p95_234.06ms_50_cached_AI_calls_real_browser_core_outcomes_e2e_6_ok
+2026-08-06T12:29:21Z | codex | EP-007 | SIG | exact_verify_preflight_stopped_on_unavailable_STRIPE_SECRET_KEY_exit_1_after_all_independent_M2_gates_passed
+2026-08-06T12:29:24Z | codex | EP-007 | HYPOTHESIS | preserve_EXT005_release_blocker_and_checkpoint_only_the_fully_verified_independent_hardening_work
+2026-08-06T12:29:28Z | codex | EP-007 | HEARTBEAT | unit_50_integration_71_e2e_6_contract_39_operations_1727_cases_build_21_security_audit_reality_smoke_live_fire_2_k6_50VUs_250_iterations_p95_240.45ms_ok
+2026-08-06T12:29:33Z | codex | EP-007 | EXTERNAL_DEFERRED | verify_exit_1_missing_STRIPE_SECRET_KEY_EXT005_authenticated_Stripe_sandbox_and_production_performance_manual_accessibility_evidence_remain
+2026-08-06T12:29:39Z | codex | EP-007 | CONTINUATION_PASS | all_locally_possible_M2_gates_pass_no_MILESTONE_PASS_NODE_DONE_or_green_tag
+2026-08-06T12:29:43Z | codex | EP-007 | LEASE_RELEASE | engineering_checkpoint_complete_exact_node_verify_externally_blocked
