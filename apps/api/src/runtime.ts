@@ -259,6 +259,40 @@ export function createApplicationRuntime(environment: Environment): {
         });
         return started;
       },
+      confirmPrivacyDeletion: async (identity, input) => {
+        const recoveryDays = environment.DELETION_RECOVERY_DAYS ?? 30;
+        const started = await repository.confirmPrivacyDeletion(identity, {
+          ...input,
+          confirmedAt: new Date().toISOString(),
+          recoveryDays,
+        });
+        await enqueueWorkflow(
+          workflowQueue,
+          "privacy-delete",
+          {
+            workflowId: started.workflow.id,
+            organizationId: identity.organizationId,
+            householdId: identity.householdId,
+            actorId: identity.actorId,
+          },
+          {
+            delay: Math.max(
+              0,
+              Date.parse(started.privacyRequest.recoveryUntil) - Date.now(),
+            ),
+          },
+        );
+        return started;
+      },
+      cancelPrivacyDeletion: async (identity, input) => {
+        const cancelled = await repository.cancelPrivacyDeletion(
+          identity,
+          input,
+        );
+        const job = await workflowQueue.getJob(cancelled.workflow.id);
+        if (job) await job.remove();
+        return cancelled;
+      },
       encryptFactValue: async (identity, input) => {
         const id = randomUUID();
         const key = await householdKeyStore.getOrCreateActiveKey(identity);

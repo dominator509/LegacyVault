@@ -13,6 +13,8 @@ import {
   VaultRepository,
   type DocumentProcessingInput,
   type PortableExportBuildInput,
+  type PrivacyDeletionInput,
+  type PrivacyDeletionProgress,
   type TenantContext,
 } from "@legacy/database/repository";
 import {
@@ -71,6 +73,22 @@ export interface PortableExportObjectStore {
     ciphertext: Uint8Array;
     checksumSha256Base64: string;
   }): Promise<void>;
+}
+
+export interface PrivacyDeletionRepository {
+  getPrivacyDeletionInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<PrivacyDeletionInput>;
+  completePrivacyDeletionActiveSystem(
+    context: TenantContext,
+    input: {
+      executionId: string;
+      expectedVersion: number;
+      completedAt: string;
+      backupRetentionDays: number;
+    },
+  ): Promise<PrivacyDeletionProgress>;
 }
 
 export interface DocumentProcessingRepository {
@@ -237,6 +255,44 @@ export function createPortableExportWorkflowHandler(input: {
       exportKey.fill(0);
       householdKey.plaintextKey.fill(0);
     }
+  };
+}
+
+export function createPrivacyDeletionWorkflowHandler(input: {
+  repository: PrivacyDeletionRepository;
+  backupRetentionDays: number;
+  now?: () => Date;
+}): WorkflowHandler {
+  return async (data) => {
+    const context = {
+      organizationId: data.organizationId,
+      householdId: data.householdId,
+      actorId: data.actorId,
+    };
+    const deletion = await input.repository.getPrivacyDeletionInput(
+      context,
+      data.workflowId,
+    );
+    if (
+      [
+        "awaiting-review",
+        "awaiting-processors",
+        "awaiting-backup-expiry",
+        "completed",
+        "cancelled",
+        "blocked-legal-hold",
+      ].includes(deletion.status)
+    )
+      return;
+    const now = input.now?.() ?? new Date();
+    if (now.getTime() < Date.parse(deletion.recoveryUntil))
+      throw new Error("privacy deletion recovery period has not elapsed");
+    await input.repository.completePrivacyDeletionActiveSystem(context, {
+      executionId: deletion.executionId,
+      expectedVersion: deletion.version,
+      completedAt: now.toISOString(),
+      backupRetentionDays: input.backupRetentionDays,
+    });
   };
 }
 
@@ -660,6 +716,10 @@ async function main(): Promise<void> {
     objectStore,
     ocr,
   });
+  const privacyDelete = createPrivacyDeletionWorkflowHandler({
+    repository,
+    backupRetentionDays: environment.BACKUP_RETENTION_DAYS ?? 35,
+  });
   const worker = createWorkflowWorker(
     environment.REDIS_URL,
     {
@@ -674,6 +734,7 @@ async function main(): Promise<void> {
         applicationKek,
         signingKeyPkcs8Base64: environment.EXPORT_SIGNING_KEY,
       }),
+      "privacy-delete": privacyDelete,
     },
     environment.WORKFLOW_QUEUE_NAME,
   );
@@ -689,7 +750,7 @@ async function main(): Promise<void> {
     JSON.stringify({
       service: "worker",
       status: "ready",
-      handlers: ["document-process", "privacy-export"],
+      handlers: ["document-process", "privacy-delete", "privacy-export"],
     }) + "\n",
   );
 }

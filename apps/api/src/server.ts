@@ -14,6 +14,8 @@ import { createApplicationRuntime } from "./runtime.js";
 import type { AuthenticatedTenantIdentity } from "@legacy/auth";
 import type { StartedPortableExport } from "@legacy/database/repository";
 import type { StartedDocumentProcessing } from "@legacy/database/repository";
+import type { ConfirmedPrivacyDeletion } from "@legacy/database/repository";
+import type { CancelledPrivacyDeletion } from "@legacy/database/repository";
 import type { RecordCategory } from "@legacy/domain";
 
 export interface ServerDependencies {
@@ -27,6 +29,22 @@ export interface ServerDependencies {
     identity: AuthenticatedTenantIdentity,
     input: { idempotencyKey: string; exportKey: Uint8Array },
   ) => Promise<StartedPortableExport>;
+  confirmPrivacyDeletion?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      requestId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<ConfirmedPrivacyDeletion>;
+  cancelPrivacyDeletion?: (
+    identity: AuthenticatedTenantIdentity,
+    input: {
+      requestId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ) => Promise<CancelledPrivacyDeletion>;
   encryptFactValue?: (
     identity: AuthenticatedTenantIdentity,
     input: { fieldKey: string; plaintext: Uint8Array },
@@ -107,6 +125,8 @@ export function buildServer(dependencies?: ServerDependencies) {
     (!dependencies?.auth ||
       !dependencies.authorizeIdentity ||
       !dependencies.startPortableExport ||
+      !dependencies.confirmPrivacyDeletion ||
+      !dependencies.cancelPrivacyDeletion ||
       !dependencies.encryptFactValue ||
       !dependencies.createReport ||
       !dependencies.createCheckout ||

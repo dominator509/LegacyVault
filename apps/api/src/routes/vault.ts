@@ -117,6 +117,22 @@ export async function registerVaultRoutes(
       identity: AuthenticatedTenantIdentity,
       input: { idempotencyKey: string; exportKey: Uint8Array },
     ) => Promise<unknown>;
+    confirmPrivacyDeletion?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        requestId: string;
+        expectedVersion: number;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
+    cancelPrivacyDeletion?: (
+      identity: AuthenticatedTenantIdentity,
+      input: {
+        requestId: string;
+        expectedVersion: number;
+        idempotencyKey: string;
+      },
+    ) => Promise<unknown>;
     encryptFactValue?: (
       identity: AuthenticatedTenantIdentity,
       input: { fieldKey: string; plaintext: Uint8Array },
@@ -830,6 +846,12 @@ export async function registerVaultRoutes(
         "privacy request kind is invalid",
       );
     const personId = requiredUuid(body, "personId");
+    if (personId !== identity.actorId)
+      throw new ApiProblem(
+        403,
+        "Forbidden",
+        "privacy requests must be submitted by the data subject",
+      );
     const result = await dependencies.repository.startPrivacyRequest(identity, {
       personId,
       kind: kind as "access" | "correction" | "export" | "deletion" | "appeal",
@@ -838,6 +860,84 @@ export async function registerVaultRoutes(
     });
     return reply.code(202).send(result);
   });
+
+  server.post(
+    "/v1/privacy-requests/:requestId/confirm-deletion",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.confirmPrivacyDeletion)
+        throw new ApiProblem(
+          503,
+          "Deletion unavailable",
+          "The deletion workflow is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "delete",
+        purpose: "vault.privacy-request.confirm-deletion",
+      });
+      const parameters = request.params as { requestId?: string };
+      const requestId = parameters.requestId;
+      if (!requestId || !uuidPattern.test(requestId))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "requestId must be a UUID",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const result = await dependencies.confirmPrivacyDeletion(identity, {
+        requestId,
+        expectedVersion,
+        idempotencyKey: idempotencyKey(request),
+      });
+      return reply.code(202).send(result);
+    },
+  );
+
+  server.post(
+    "/v1/privacy-requests/:requestId/cancel-deletion",
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      if (!dependencies.cancelPrivacyDeletion)
+        throw new ApiProblem(
+          503,
+          "Deletion cancellation unavailable",
+          "The deletion workflow is not configured.",
+        );
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "delete",
+        purpose: "vault.privacy-request.cancel-deletion",
+      });
+      const parameters = request.params as { requestId?: string };
+      const requestId = parameters.requestId;
+      if (!requestId || !uuidPattern.test(requestId))
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "requestId must be a UUID",
+        );
+      const expectedVersion = Number(request.headers["if-match"]);
+      if (!Number.isSafeInteger(expectedVersion) || expectedVersion < 1)
+        throw new ApiProblem(
+          400,
+          "Invalid request",
+          "a valid if-match version is required",
+        );
+      const result = await dependencies.cancelPrivacyDeletion(identity, {
+        requestId,
+        expectedVersion,
+        idempotencyKey: idempotencyKey(request),
+      });
+      return reply.send(result);
+    },
+  );
 
   server.post("/v1/exports", async (request, reply) => {
     const identity = await dependencies.resolveIdentity(request);

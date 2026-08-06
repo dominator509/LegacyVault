@@ -99,6 +99,41 @@ export interface DocumentProcessingInput extends DocumentUploadRecord {
   nextStep: string | null;
 }
 
+export interface ConfirmedPrivacyDeletion {
+  privacyRequest: {
+    id: string;
+    status: "recovery-period";
+    version: number;
+    recoveryUntil: string;
+  };
+  execution: { id: string; status: "recovery-period"; version: number };
+  workflow: { id: string; status: string; version: number };
+}
+
+export interface CancelledPrivacyDeletion {
+  privacyRequest: { id: string; status: "cancelled"; version: number };
+  execution: { id: string; status: "cancelled"; version: number };
+  workflow: { id: string; status: "completed"; version: number };
+}
+
+export interface PrivacyDeletionInput {
+  executionId: string;
+  privacyRequestId: string;
+  workflowId: string;
+  personId: string;
+  status: string;
+  recoveryUntil: string;
+  version: number;
+  legalHoldCategories: string[];
+}
+
+export interface PrivacyDeletionProgress {
+  executionId: string;
+  status: "awaiting-review" | "blocked-legal-hold";
+  backupExpiresAt?: string;
+  legalHoldCategories: string[];
+}
+
 export class VaultRepository {
   readonly #pool: pg.Pool;
   constructor(databaseUrl: string) {
@@ -1007,6 +1042,10 @@ export class VaultRepository {
     };
     workflow?: { id: string; status: string; version: number };
   }> {
+    if (input.personId !== context.actorId)
+      throw new Error(
+        "privacy request subject must match the authenticated person",
+      );
     return this.withTenant(context, async (client) => {
       const requestHash = createHash("sha256")
         .update(JSON.stringify({ personId: input.personId, kind: input.kind }))
@@ -1066,18 +1105,20 @@ export class VaultRepository {
         throw new Error("privacy request insert returned no row");
       let workflow: { id: string; status: string; version: number } | undefined;
       if (input.kind === "export" || input.kind === "deletion") {
+        const workflowId = randomUUID();
         const workflowResult = await client.query<{
           id: string;
           status: string;
           version: number;
         }>(
-          "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step) values ($1,$2,$3,$4,$5,'pending','[]','identity-verification') returning id,status,version",
+          "insert into workflow_runs(id,organization_id,household_id,kind,idempotency_key,status,completed_steps,next_step,subject_type,subject_id) values ($1,$2,$3,$4,$5,'pending','[]','identity-verification','PrivacyRequest',$6) returning id,status,version",
           [
-            randomUUID(),
+            workflowId,
             context.organizationId,
             context.householdId,
             input.kind,
             `privacy:${privacyId}`,
+            privacyId,
           ],
         );
         workflow = workflowResult.rows[0];
@@ -1098,6 +1139,410 @@ export class VaultRepository {
         ],
       );
       return response;
+    });
+  }
+
+  async confirmPrivacyDeletion(
+    context: TenantContext,
+    input: {
+      requestId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+      confirmedAt: string;
+      recoveryDays: number;
+    },
+  ): Promise<ConfirmedPrivacyDeletion> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            requestId: input.requestId,
+            expectedVersion: input.expectedVersion,
+            recoveryDays: input.recoveryDays,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const replay = await client.query<{
+          request_hash: string;
+          response_body: ConfirmedPrivacyDeletion | null;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = replay.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("idempotency key reused with different request");
+        if (!row.response_body)
+          throw new Error("privacy deletion confirmation is still processing");
+        return row.response_body;
+      }
+
+      const existing = await client.query<{
+        person_id: string;
+        kind: string;
+        status: string;
+      }>(
+        "select person_id,kind,status from privacy_requests where id=$1 for update",
+        [input.requestId],
+      );
+      const request = existing.rows[0];
+      if (
+        !request ||
+        request.person_id !== context.actorId ||
+        request.kind !== "deletion" ||
+        request.status !== "identity-verification"
+      )
+        throw new Error("privacy deletion request is unavailable");
+      const confirmedAt = new Date(input.confirmedAt);
+      const recoveryUntil = new Date(
+        confirmedAt.getTime() + input.recoveryDays * 86_400_000,
+      );
+      if (
+        !Number.isFinite(confirmedAt.getTime()) ||
+        !Number.isFinite(recoveryUntil.getTime())
+      )
+        throw new Error("privacy deletion confirmation time is invalid");
+      const privacyResult = await client.query<{
+        id: string;
+        status: "recovery-period";
+        version: number;
+        recovery_until: Date;
+      }>(
+        "update privacy_requests set status='recovery-period',verified_at=$1,recovery_until=$2,version=version+1 where id=$3 and version=$4 returning id,status,version,recovery_until",
+        [
+          confirmedAt.toISOString(),
+          recoveryUntil.toISOString(),
+          input.requestId,
+          input.expectedVersion,
+        ],
+      );
+      const privacyRequest = privacyResult.rows[0];
+      if (!privacyRequest)
+        throw new Error("privacy deletion confirmation version conflict");
+      const workflowResult = await client.query<{
+        id: string;
+        status: string;
+        version: number;
+      }>(
+        "update workflow_runs set status='pending',completed_steps='[\"identity-verification\"]',next_step='active-system',version=version+1 where subject_type='PrivacyRequest' and subject_id=$1 and kind='deletion' and next_step='identity-verification' returning id,status,version",
+        [input.requestId],
+      );
+      const workflow = workflowResult.rows[0];
+      if (!workflow)
+        throw new Error("privacy deletion workflow is unavailable");
+      const executionResult = await client.query<{
+        id: string;
+        status: "recovery-period";
+        version: number;
+      }>(
+        "insert into deletion_executions(id,organization_id,household_id,privacy_request_id,workflow_id,person_id,status,recovery_until) values ($1,$2,$3,$4,$5,$6,'recovery-period',$7) returning id,status,version",
+        [
+          randomUUID(),
+          context.organizationId,
+          context.householdId,
+          input.requestId,
+          workflow.id,
+          context.actorId,
+          recoveryUntil.toISOString(),
+        ],
+      );
+      const execution = executionResult.rows[0];
+      if (!execution)
+        throw new Error("privacy deletion execution was not persisted");
+      const response: ConfirmedPrivacyDeletion = {
+        privacyRequest: {
+          id: privacyRequest.id,
+          status: privacyRequest.status,
+          version: privacyRequest.version,
+          recoveryUntil: privacyRequest.recovery_until.toISOString(),
+        },
+        execution,
+        workflow,
+      };
+      await client.query(
+        "update idempotency_records set status_code=202,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
+    });
+  }
+
+  async getPrivacyDeletionInput(
+    context: TenantContext,
+    workflowId: string,
+  ): Promise<PrivacyDeletionInput> {
+    return this.withTenant(context, async (client) => {
+      const result = await client.query<{
+        execution_id: string;
+        privacy_request_id: string;
+        workflow_id: string;
+        person_id: string;
+        status: string;
+        recovery_until: Date;
+        version: number;
+      }>(
+        "select de.id as execution_id,de.privacy_request_id,de.workflow_id,de.person_id,de.status,de.recovery_until,de.version from deletion_executions de join privacy_requests pr on pr.id=de.privacy_request_id join workflow_runs w on w.id=de.workflow_id where de.workflow_id=$1 and pr.kind='deletion' and w.kind='deletion' and w.subject_type='PrivacyRequest' and w.subject_id=pr.id",
+        [workflowId],
+      );
+      const row = result.rows[0];
+      if (!row) throw new Error("privacy deletion execution is unavailable");
+      const holds = await client.query<{ category: string }>(
+        "select distinct category from legal_holds where released_at is null and starts_at<=now() and (expires_at is null or expires_at>now()) and ((subject_type='Household' and subject_id=$1) or (subject_type='Person' and subject_id=$2)) order by category",
+        [context.householdId, row.person_id],
+      );
+      return {
+        executionId: row.execution_id,
+        privacyRequestId: row.privacy_request_id,
+        workflowId: row.workflow_id,
+        personId: row.person_id,
+        status: row.status,
+        recoveryUntil: row.recovery_until.toISOString(),
+        version: row.version,
+        legalHoldCategories: holds.rows.map((hold) => hold.category),
+      };
+    });
+  }
+
+  async cancelPrivacyDeletion(
+    context: TenantContext,
+    input: {
+      requestId: string;
+      expectedVersion: number;
+      idempotencyKey: string;
+    },
+  ): Promise<CancelledPrivacyDeletion> {
+    return this.withTenant(context, async (client) => {
+      const requestHash = createHash("sha256")
+        .update(
+          JSON.stringify({
+            requestId: input.requestId,
+            expectedVersion: input.expectedVersion,
+          }),
+        )
+        .digest("hex");
+      const reserved = await client.query(
+        "insert into idempotency_records(organization_id,household_id,idempotency_key,request_hash,expires_at) values ($1,$2,$3,$4,now()+interval '24 hours') on conflict do nothing",
+        [
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+          requestHash,
+        ],
+      );
+      if (reserved.rowCount === 0) {
+        const replay = await client.query<{
+          request_hash: string;
+          response_body: CancelledPrivacyDeletion | null;
+        }>(
+          "select request_hash,response_body from idempotency_records where organization_id=$1 and household_id=$2 and idempotency_key=$3",
+          [context.organizationId, context.householdId, input.idempotencyKey],
+        );
+        const row = replay.rows[0];
+        if (!row || row.request_hash !== requestHash)
+          throw new Error("idempotency key reused with different request");
+        if (!row.response_body)
+          throw new Error("privacy deletion cancellation is still processing");
+        return row.response_body;
+      }
+      const privacyResult = await client.query<{
+        id: string;
+        status: "cancelled";
+        version: number;
+      }>(
+        "update privacy_requests set status='cancelled',completed_at=now(),version=version+1 where id=$1 and person_id=$2 and kind='deletion' and status='recovery-period' and version=$3 returning id,status,version",
+        [input.requestId, context.actorId, input.expectedVersion],
+      );
+      const privacyRequest = privacyResult.rows[0];
+      if (!privacyRequest)
+        throw new Error("privacy deletion cancellation conflict");
+      const executionResult = await client.query<{
+        id: string;
+        status: "cancelled";
+        version: number;
+      }>(
+        "update deletion_executions set status='cancelled',completed_at=now(),version=version+1 where privacy_request_id=$1 and status='recovery-period' returning id,status,version",
+        [input.requestId],
+      );
+      const execution = executionResult.rows[0];
+      if (!execution)
+        throw new Error("privacy deletion execution cancellation conflict");
+      const workflowResult = await client.query<{
+        id: string;
+        status: "completed";
+        version: number;
+      }>(
+        "update workflow_runs set status='completed',completed_steps=case when completed_steps ? 'cancelled' then completed_steps else completed_steps || '[\"cancelled\"]'::jsonb end,next_step=null,last_error_class=null,version=version+1 where subject_type='PrivacyRequest' and subject_id=$1 and kind='deletion' and status<>'completed' returning id,status,version",
+        [input.requestId],
+      );
+      const workflow = workflowResult.rows[0];
+      if (!workflow)
+        throw new Error("privacy deletion workflow cancellation conflict");
+      const response = { privacyRequest, execution, workflow };
+      await client.query(
+        "update idempotency_records set status_code=200,response_body=$1 where organization_id=$2 and household_id=$3 and idempotency_key=$4",
+        [
+          JSON.stringify(response),
+          context.organizationId,
+          context.householdId,
+          input.idempotencyKey,
+        ],
+      );
+      return response;
+    });
+  }
+
+  async completePrivacyDeletionActiveSystem(
+    context: TenantContext,
+    input: {
+      executionId: string;
+      expectedVersion: number;
+      completedAt: string;
+      backupRetentionDays: number;
+    },
+  ): Promise<PrivacyDeletionProgress> {
+    return this.withTenant(context, async (client) => {
+      const executionResult = await client.query<{
+        privacy_request_id: string;
+        workflow_id: string;
+        person_id: string;
+        status: string;
+        recovery_until: Date;
+        version: number;
+      }>(
+        "select privacy_request_id,workflow_id,person_id,status,recovery_until,version from deletion_executions where id=$1 for update",
+        [input.executionId],
+      );
+      const execution = executionResult.rows[0];
+      if (
+        !execution ||
+        execution.version !== input.expectedVersion ||
+        execution.status !== "recovery-period"
+      )
+        throw new Error("privacy deletion execution conflict");
+      const completedAt = new Date(input.completedAt);
+      if (!Number.isFinite(completedAt.getTime()))
+        throw new Error("privacy deletion completion time is invalid");
+      if (completedAt.getTime() < execution.recovery_until.getTime())
+        throw new Error("privacy deletion recovery period has not elapsed");
+      const holds = await client.query<{ category: string }>(
+        "select distinct category from legal_holds where released_at is null and starts_at<=$1 and (expires_at is null or expires_at>$1) and ((subject_type='Household' and subject_id=$2) or (subject_type='Person' and subject_id=$3)) order by category",
+        [completedAt.toISOString(), context.householdId, execution.person_id],
+      );
+      const legalHoldCategories = holds.rows.map((hold) => hold.category);
+      if (legalHoldCategories.length > 0) {
+        await client.query(
+          "update deletion_executions set status='blocked-legal-hold',retained_categories=$1,version=version+1 where id=$2",
+          [JSON.stringify(legalHoldCategories), input.executionId],
+        );
+        await client.query(
+          "update privacy_requests set status='blocked-legal-hold',version=version+1 where id=$1",
+          [execution.privacy_request_id],
+        );
+        await client.query(
+          "update workflow_runs set status='running',next_step='legal-hold-review',last_error_class=null,version=version+1 where id=$1",
+          [execution.workflow_id],
+        );
+        return {
+          executionId: input.executionId,
+          status: "blocked-legal-hold",
+          legalHoldCategories,
+        };
+      }
+
+      const memberships = await client.query<{
+        id: string;
+        auth_user_id: string | null;
+      }>(
+        "select id,auth_user_id from memberships where person_id=$1 and active=1 for update",
+        [execution.person_id],
+      );
+      const membershipIds = memberships.rows.map((membership) => membership.id);
+      if (membershipIds.length > 0) {
+        await client.query(
+          "update permission_grants set revoked_at=coalesce(revoked_at,$1),version=version+1 where membership_id=any($2::uuid[]) and revoked_at is null",
+          [completedAt.toISOString(), membershipIds],
+        );
+        await client.query(
+          "update support_access_approvals set revoked_at=coalesce(revoked_at,$1),version=version+1 where support_membership_id=any($2::uuid[]) and revoked_at is null",
+          [completedAt.toISOString(), membershipIds],
+        );
+        await client.query(
+          "update memberships set active=0,version=version+1 where id=any($1::uuid[]) and active=1",
+          [membershipIds],
+        );
+      }
+      const authUserIds = memberships.rows.flatMap((membership) =>
+        membership.auth_user_id ? [membership.auth_user_id] : [],
+      );
+      if (authUserIds.length > 0)
+        await client.query(
+          'delete from "session" where "userId"=any($1::text[])',
+          [authUserIds],
+        );
+      await client.query("delete from people where id=$1", [
+        execution.person_id,
+      ]);
+
+      const processors = ["deepseek", "resend", "sentry", "stripe"];
+      for (const processor of processors)
+        await client.query(
+          "insert into deletion_processor_requests(id,organization_id,household_id,workflow_id,processor,status,requested_at) values ($1,$2,$3,$4,$5,'verification-required',$6) on conflict (workflow_id,processor) do nothing",
+          [
+            randomUUID(),
+            context.organizationId,
+            context.householdId,
+            execution.workflow_id,
+            processor,
+            completedAt.toISOString(),
+          ],
+        );
+      const backupExpiresAt = new Date(
+        completedAt.getTime() + input.backupRetentionDays * 86_400_000,
+      );
+      const retainedCategories = [
+        "audit-events",
+        "billing-records",
+        "consent-acceptance",
+        "privacy-request-evidence",
+      ];
+      await client.query(
+        "update deletion_executions set status='awaiting-review',active_system_completed_at=$1,backup_expires_at=$2,retained_categories=$3,shared_data_review_required=true,version=version+1 where id=$4",
+        [
+          completedAt.toISOString(),
+          backupExpiresAt.toISOString(),
+          JSON.stringify(retainedCategories),
+          input.executionId,
+        ],
+      );
+      await client.query(
+        "update privacy_requests set status='awaiting-review',version=version+1 where id=$1",
+        [execution.privacy_request_id],
+      );
+      await client.query(
+        "update workflow_runs set status='running',completed_steps=case when completed_steps ? 'active-system' then completed_steps else completed_steps || '[\"active-system\"]'::jsonb end,next_step='shared-data-review',last_error_class=null,version=version+1 where id=$1",
+        [execution.workflow_id],
+      );
+      return {
+        executionId: input.executionId,
+        status: "awaiting-review",
+        backupExpiresAt: backupExpiresAt.toISOString(),
+        legalHoldCategories: [],
+      };
     });
   }
 

@@ -44,6 +44,14 @@ const server = buildServer({
       workflow: { id: randomUUID(), status: "pending", version: 1 },
     };
   },
+  confirmPrivacyDeletion: async (resolved, input) =>
+    repository.confirmPrivacyDeletion(resolved, {
+      ...input,
+      confirmedAt: "2026-08-06T00:00:00.000Z",
+      recoveryDays: 30,
+    }),
+  cancelPrivacyDeletion: async (resolved, input) =>
+    repository.cancelPrivacyDeletion(resolved, input),
   encryptFactValue: async (_resolved, input) => ({
     id: randomUUID(),
     ciphertext: Buffer.from(
@@ -100,6 +108,24 @@ beforeAll(async () => {
     await client.query(
       "insert into households(id,organization_id,name) values ($1,$2,$3)",
       [identity.householdId, identity.organizationId, "API Test Household"],
+    );
+    await client.query(
+      "insert into people(id,organization_id,household_id,display_name_encrypted,key_version) values ($1,$2,$3,$4,1)",
+      [
+        identity.actorId,
+        identity.organizationId,
+        identity.householdId,
+        Buffer.from("encrypted-test-identity"),
+      ],
+    );
+    await client.query(
+      "insert into memberships(id,organization_id,household_id,person_id,role,active) values ($1,$2,$3,$4,'Owner',1)",
+      [
+        identity.membershipId,
+        identity.organizationId,
+        identity.householdId,
+        identity.actorId,
+      ],
     );
     await client.query("commit");
   } finally {
@@ -177,8 +203,15 @@ describe("vault API persistence", () => {
   });
 
   it("atomically persists and replays a canonical privacy request and deletion workflow", async () => {
+    const otherSubject = await server.inject({
+      method: "POST",
+      url: "/v1/privacy-requests",
+      headers: { "idempotency-key": `privacy-other-${randomUUID()}` },
+      payload: { personId: randomUUID(), kind: "deletion" },
+    });
+    expect(otherSubject.statusCode).toBe(403);
     const key = `privacy-${randomUUID()}`;
-    const payload = { personId: randomUUID(), kind: "deletion" };
+    const payload = { personId: identity.actorId, kind: "deletion" };
     const created = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
@@ -202,6 +235,65 @@ describe("vault API persistence", () => {
     });
     expect(replay.statusCode).toBe(202);
     expect(replay.json()).toEqual(created.json());
+    const request = created.json<{
+      privacyRequest: { id: string; version: number };
+      workflow: { id: string };
+    }>();
+    const confirmationKey = `confirm-deletion-${randomUUID()}`;
+    const confirmed = await server.inject({
+      method: "POST",
+      url: `/v1/privacy-requests/${request.privacyRequest.id}/confirm-deletion`,
+      headers: {
+        "idempotency-key": confirmationKey,
+        "if-match": String(request.privacyRequest.version),
+      },
+    });
+    expect(confirmed.statusCode).toBe(202);
+    expect(confirmed.json()).toMatchObject({
+      privacyRequest: {
+        id: request.privacyRequest.id,
+        status: "recovery-period",
+        version: 2,
+        recoveryUntil: "2026-09-05T00:00:00.000Z",
+      },
+      execution: { status: "recovery-period", version: 1 },
+      workflow: { id: request.workflow.id, status: "pending", version: 2 },
+    });
+    const confirmationReplay = await server.inject({
+      method: "POST",
+      url: `/v1/privacy-requests/${request.privacyRequest.id}/confirm-deletion`,
+      headers: {
+        "idempotency-key": confirmationKey,
+        "if-match": String(request.privacyRequest.version),
+      },
+    });
+    expect(confirmationReplay.statusCode).toBe(202);
+    expect(confirmationReplay.json()).toEqual(confirmed.json());
+    const cancellationKey = `cancel-deletion-${randomUUID()}`;
+    const cancelled = await server.inject({
+      method: "POST",
+      url: `/v1/privacy-requests/${request.privacyRequest.id}/cancel-deletion`,
+      headers: {
+        "idempotency-key": cancellationKey,
+        "if-match": "2",
+      },
+    });
+    expect(cancelled.statusCode).toBe(200);
+    expect(cancelled.json()).toMatchObject({
+      privacyRequest: { status: "cancelled", version: 3 },
+      execution: { status: "cancelled", version: 2 },
+      workflow: { status: "completed", version: 3 },
+    });
+    const cancellationReplay = await server.inject({
+      method: "POST",
+      url: `/v1/privacy-requests/${request.privacyRequest.id}/cancel-deletion`,
+      headers: {
+        "idempotency-key": cancellationKey,
+        "if-match": "2",
+      },
+    });
+    expect(cancellationReplay.statusCode).toBe(200);
+    expect(cancellationReplay.json()).toEqual(cancelled.json());
     const mismatched = await server.inject({
       method: "POST",
       url: "/v1/privacy-requests",
@@ -213,6 +305,16 @@ describe("vault API persistence", () => {
       category: "household-instructions",
       action: "create",
       purpose: "vault.privacy-request.create",
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "household-instructions",
+      action: "delete",
+      purpose: "vault.privacy-request.confirm-deletion",
+    });
+    expect(authorizationScopes).toContainEqual({
+      category: "household-instructions",
+      action: "delete",
+      purpose: "vault.privacy-request.cancel-deletion",
     });
   });
 

@@ -1,4 +1,5 @@
 import {
+  boolean,
   customType,
   integer,
   jsonb,
@@ -211,6 +212,9 @@ export const privacyRequests = pgTable("privacy_requests", {
   kind: text("kind").notNull(),
   status: text("status").notNull(),
   requestedAt: timestamp("requested_at", { withTimezone: true }).notNull(),
+  verifiedAt: timestamp("verified_at", { withTimezone: true }),
+  recoveryUntil: timestamp("recovery_until", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
   ...versioned,
 });
 export const subscriptions = pgTable("subscriptions", {
@@ -293,3 +297,35 @@ export const deletionProcessorRequests = pgTable(
     ),
   ],
 );
+
+export const deletionExecutions = pgTable("deletion_executions", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  privacyRequestId: uuid("privacy_request_id").notNull(),
+  workflowId: uuid("workflow_id").notNull(),
+  personId: uuid("person_id").notNull(),
+  status: text("status").notNull(),
+  recoveryUntil: timestamp("recovery_until", { withTimezone: true }).notNull(),
+  activeSystemCompletedAt: timestamp("active_system_completed_at", {
+    withTimezone: true,
+  }),
+  backupExpiresAt: timestamp("backup_expires_at", { withTimezone: true }),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  retainedCategories: jsonb("retained_categories").notNull(),
+  sharedDataReviewRequired: boolean("shared_data_review_required").notNull(),
+  ...versioned,
+});
+
+export const legalHolds = pgTable("legal_holds", {
+  id: uuid("id").primaryKey(),
+  ...tenant,
+  category: text("category").notNull(),
+  subjectType: text("subject_type").notNull(),
+  subjectId: uuid("subject_id").notNull(),
+  reasonCode: text("reason_code").notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  releasedAt: timestamp("released_at", { withTimezone: true }),
+  createdBy: uuid("created_by").notNull(),
+  ...versioned,
+});

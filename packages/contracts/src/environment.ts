@@ -39,6 +39,8 @@ const environmentSchema = z
     CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
     OCR_EXECUTABLE: z.string().min(1).optional(),
     OCR_PYTHON_EXECUTABLE: z.string().min(1).optional(),
+    DELETION_RECOVERY_DAYS: z.coerce.number().int().min(1).max(365).optional(),
+    BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).optional(),
   })
   .superRefine((value, context) => {
     if (value.NODE_ENV === "production" && value.LOCAL_ENGINEERING_MODE) {
@@ -85,6 +87,8 @@ const environmentSchema = z
       "CLAMAV_PORT",
       "OCR_EXECUTABLE",
       "OCR_PYTHON_EXECUTABLE",
+      "DELETION_RECOVERY_DAYS",
+      "BACKUP_RETENTION_DAYS",
     ] as const) {
       if (value.NODE_ENV === "production" && !value[field])
         context.addIssue({

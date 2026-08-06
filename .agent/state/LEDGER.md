@@ -178,3 +178,13 @@
 2026-08-06T00:33:15Z | codex | EP-004 | HYPOTHESIS | assign_the_existing_20_second_real_integration_budget_to_the_full_database_queue_storage_ClamAV_OCR_flow_then_rerun_the_complete_suite
 2026-08-06T00:33:15Z | codex | EP-004 | HEARTBEAT | raster_normalization_and_page_limit_checkpoint_unit_37_integration_41_e2e_2_build_format_security_audit_smoke_ok
 2026-08-06T00:34:14Z | codex | EP-004 | HEARTBEAT | authenticated_DeepSeek_live_fire_2_ok_after_document_pipeline_changes_credential_still_ignored_and_untracked
+2026-08-06T00:57:43Z | codex | EP-004 | SIG | deletion_authority_search_exit_1_due_nonexistent_root_privacy_paths_and_stale_assumed_migration_names
+2026-08-06T00:57:43Z | codex | EP-004 | HYPOTHESIS | enumerate_materialized_compliance_and_drizzle_files_then_read_actual_authorities_without_inferring_missing_content
+2026-08-06T00:57:43Z | codex | EP-004 | SIG | default_queue_worker_readiness_mutation_rejected_as_unsafe_before_process_start
+2026-08-06T00:57:43Z | codex | EP-004 | HYPOTHESIS | use_a_process_unique_empty_queue_and_unique_logs_for_non_consuming_readiness_proof
+2026-08-06T00:57:43Z | codex | EP-004 | SIG | isolated_worker_readiness_parent_stop_left_two_tsx_child_trees_running
+2026-08-06T00:57:43Z | codex | EP-004 | HYPOTHESIS | identify_only_processes_created_at_the_two_readiness_timestamps_and_stop_the_four_exact_PIDs_then_verify_absence
+2026-08-06T00:57:43Z | codex | EP-004 | HEARTBEAT | privacy_deletion_confirm_cancel_recovery_legal_hold_access_revoke_retained_evidence_processor_review_backup_expiry_worker_ready_unit_37_integration_44_e2e_2_live_fire_2_build_format_security_audit_smoke_ok
+2026-08-06T00:59:35Z | codex | EP-004 | SIG | proposed_silent_delayed_job_removal_fallback_rejected_as_destructive_race_risk_before_file_change
+2026-08-06T00:59:35Z | codex | EP-004 | HYPOTHESIS | retain_strict_queue_removal_error_propagation_while_durable_cancelled_execution_status_remains_the_worker_fail_closed_authority
+2026-08-06T00:59:35Z | codex | EP-004 | HEARTBEAT | privacy_request_self_subject_defense_in_depth_focused_API_and_deletion_13_tests_lint_security_ok_credential_ignored_untracked
