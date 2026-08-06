@@ -13,7 +13,11 @@ import {
   type AuthenticatedTenantIdentity,
   HouseholdSelectionRequiredError,
 } from "@legacy/auth";
-import type { PermissionAction, RecordCategory } from "@legacy/domain";
+import type {
+  ConsentPurpose,
+  PermissionAction,
+  RecordCategory,
+} from "@legacy/domain";
 import type { ReportKind } from "@legacy/domain";
 import { scanDlp } from "@legacy/ai-gateway";
 import {
@@ -87,6 +91,24 @@ const uuidPathSchema = {
   required: ["id"],
   properties: { id: { type: "string", format: "uuid" } },
 } as const;
+
+const consentPurposes = [
+  "external-ai",
+  "sensitive-data",
+  "document-processing",
+  "transactional-email",
+  "terms",
+  "privacy-policy",
+] as const satisfies readonly ConsentPurpose[];
+
+function consentPurpose(value: unknown): ConsentPurpose {
+  if (
+    typeof value !== "string" ||
+    !consentPurposes.includes(value as ConsentPurpose)
+  )
+    throw new ApiProblem(400, "Invalid request", "purpose is invalid");
+  return value as ConsentPurpose;
+}
 
 const privacyRequestPathSchema = {
   type: "object",
@@ -574,6 +596,70 @@ export async function registerVaultRoutes(
         categories as RecordCategory[],
       );
       return reply.header("cache-control", "no-store").send({ facts });
+    },
+  );
+
+  server.get<{ Querystring: { purpose: string } }>(
+    "/v1/consents",
+    {
+      schema: {
+        tags: ["consents"],
+        summary: "Read the authenticated person's active consent by purpose",
+        security: [{ sessionCookie: [] }],
+        querystring: {
+          type: "object",
+          additionalProperties: false,
+          required: ["purpose"],
+          properties: {
+            purpose: { type: "string", enum: consentPurposes },
+          },
+        },
+        response: {
+          200: {
+            description: "Active self-scoped consent or null",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: ["consent"],
+                  properties: {
+                    consent: {
+                      anyOf: [
+                        {
+                          type: "object",
+                          additionalProperties: false,
+                          required: ["id", "policyVersion", "version"],
+                          properties: {
+                            id: { type: "string", format: "uuid" },
+                            policyVersion: { type: "string" },
+                            version: { type: "integer", minimum: 1 },
+                          },
+                        },
+                        { type: "null" },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          },
+          ...standardProblemResponses,
+        },
+      },
+    },
+    async (request, reply) => {
+      const identity = await dependencies.resolveIdentity(request);
+      await dependencies.authorizeIdentity?.(identity, {
+        category: "household-instructions",
+        action: "read",
+        purpose: "vault.consent.read",
+      });
+      const consent = await dependencies.repository.getActiveConsent(identity, {
+        personId: identity.actorId,
+        purpose: consentPurpose(request.query.purpose),
+      });
+      return reply.header("cache-control", "no-store").send({ consent });
     },
   );
 
@@ -1941,17 +2027,7 @@ export async function registerVaultRoutes(
           required: ["personId", "purpose", "policyVersion"],
           properties: {
             personId: { type: "string", format: "uuid" },
-            purpose: {
-              type: "string",
-              enum: [
-                "external-ai",
-                "sensitive-data",
-                "document-processing",
-                "transactional-email",
-                "terms",
-                "privacy-policy",
-              ],
-            },
+            purpose: { type: "string", enum: consentPurposes },
             policyVersion: { type: "string", minLength: 1, maxLength: 120 },
           },
         },
@@ -1961,23 +2037,19 @@ export async function registerVaultRoutes(
       const identity = await dependencies.resolveIdentity(request);
       const body = objectBody(request.body);
       creationVersion(request);
+      const personId = requiredUuid(body, "personId");
+      if (personId !== identity.actorId)
+        throw new ApiProblem(
+          403,
+          "Access denied",
+          "Consent can be recorded only for the authenticated person.",
+        );
       await dependencies.authorizeIdentity?.(identity, {
         category: "household-instructions",
         action: "approve",
         purpose: "vault.consent.record",
       });
-      const purpose = requiredString(body, "purpose");
-      if (
-        ![
-          "external-ai",
-          "sensitive-data",
-          "document-processing",
-          "transactional-email",
-          "terms",
-          "privacy-policy",
-        ].includes(purpose)
-      )
-        throw new ApiProblem(400, "Invalid request", "purpose is invalid");
+      const purpose = consentPurpose(requiredString(body, "purpose"));
       const key = idempotencyKey(request);
       const reservation = await dependencies.repository.reserveIdempotency(
         identity,
@@ -1989,7 +2061,7 @@ export async function registerVaultRoutes(
           .code(reservation.statusCode ?? 409)
           .send(reservation.responseBody ?? { status: "processing" });
       const consent = await dependencies.repository.recordConsent(identity, {
-        personId: requiredUuid(body, "personId"),
+        personId,
         purpose,
         policyVersion: requiredString(body, "policyVersion"),
         grantedAt: new Date().toISOString(),

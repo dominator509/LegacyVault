@@ -344,3 +344,12 @@
 2026-08-06T10:11:34Z | codex | EP-004 | HYPOTHESIS | run_the_authorized_repository_formatter_then_rerun_the_exact_format_gate
 2026-08-06T10:11:34Z | codex | EP-004 | HEARTBEAT | account_scoped_household_summary_returns_only_callers_personId_OpenAPI_schema_typecheck_integration_69_security_format_ok_ADR066
 2026-08-06T10:11:34Z | codex | EP-004 | LEASE_RELEASE | self_identity_contract_checkpoint_complete_exact_node_verify_still_deferred_EXT005
+2026-08-06T10:11:49Z | codex | EP-005 | LEASE | resume_after_EP004_self_identity_contract_checkpoint
+2026-08-06T10:20:20Z | codex | EP-005 | LEASE_RELEASE | active_AI_consent_read_contract_required_for_reload_safe_withdrawal
+2026-08-06T10:20:20Z | codex | EP-004 | LEASE | expose_self_scoped_active_AI_consent_state_for_EP005
+2026-08-06T10:25:57Z | codex | EP-004 | SIG | active_consent_read_returned_null_after_existing_test_created_consent_for_a_different_household_person_exit_1
+2026-08-06T10:25:57Z | codex | EP-004 | HYPOTHESIS | enforce_personId_equals_authenticated_actor_before_consent_persistence_and_test_both_denial_and_self_state
+2026-08-06T10:25:57Z | codex | EP-004 | SIG | consent_route_format_gate_exit_1_after_new_schema_before_formatter
+2026-08-06T10:25:58Z | codex | EP-004 | HYPOTHESIS | run_authorized_formatter_then_rerun_format_and_type_gates
+2026-08-06T10:25:58Z | codex | EP-004 | HEARTBEAT | self_only_consent_create_non_cacheable_active_lookup_versioned_withdrawal_integration_69_contract_39_operations_1727_cases_type_format_security_ok_ADR068
+2026-08-06T10:25:58Z | codex | EP-004 | LEASE_RELEASE | active_consent_contract_checkpoint_complete_exact_node_verify_still_deferred_EXT005

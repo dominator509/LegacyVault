@@ -1235,30 +1235,20 @@ describe("vault API persistence", () => {
   });
 
   it("records versioned Terms consent and withdraws it idempotently", async () => {
-    const personId = randomUUID();
-    const client = createDatabaseClient(databaseUrl);
-    await client.connect();
-    try {
-      await client.query("begin");
-      await client.query("select set_config('app.organization_id',$1,true)", [
-        identity.organizationId,
-      ]);
-      await client.query("select set_config('app.household_id',$1,true)", [
-        identity.householdId,
-      ]);
-      await client.query(
-        "insert into people(id,organization_id,household_id,display_name_encrypted,key_version) values ($1,$2,$3,$4,1)",
-        [
-          personId,
-          identity.organizationId,
-          identity.householdId,
-          Buffer.from("encrypted"),
-        ],
-      );
-      await client.query("commit");
-    } finally {
-      await client.end();
-    }
+    const denied = await server.inject({
+      method: "POST",
+      url: "/v1/consents",
+      headers: {
+        "idempotency-key": `consent-denied-${randomUUID()}`,
+        "if-match": "0",
+      },
+      payload: {
+        personId: randomUUID(),
+        purpose: "terms",
+        policyVersion: "2026-08-05",
+      },
+    });
+    expect(denied.statusCode).toBe(403);
     const created = await server.inject({
       method: "POST",
       url: "/v1/consents",
@@ -1266,10 +1256,27 @@ describe("vault API persistence", () => {
         "idempotency-key": `consent-${randomUUID()}`,
         "if-match": "0",
       },
-      payload: { personId, purpose: "terms", policyVersion: "2026-08-05" },
+      payload: {
+        personId: identity.actorId,
+        purpose: "terms",
+        policyVersion: "2026-08-05",
+      },
     });
     expect(created.statusCode).toBe(201);
     const consent = created.json<{ id: string; version: number }>();
+    const active = await server.inject({
+      method: "GET",
+      url: "/v1/consents?purpose=terms",
+    });
+    expect(active.statusCode).toBe(200);
+    expect(active.headers["cache-control"]).toBe("no-store");
+    expect(active.json()).toEqual({
+      consent: {
+        id: consent.id,
+        policyVersion: "2026-08-05",
+        version: 1,
+      },
+    });
     const key = `withdraw-${randomUUID()}`;
     const withdrawn = await server.inject({
       method: "POST",
@@ -1286,6 +1293,12 @@ describe("vault API persistence", () => {
     });
     expect(replay.statusCode).toBe(200);
     expect(replay.json()).toEqual(withdrawn.json());
+    const noLongerActive = await server.inject({
+      method: "GET",
+      url: "/v1/consents?purpose=terms",
+    });
+    expect(noLongerActive.statusCode).toBe(200);
+    expect(noLongerActive.json()).toEqual({ consent: null });
     expect(authorizationScopes).toContainEqual({
       category: "household-instructions",
       action: "approve",
