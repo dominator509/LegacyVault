@@ -2,6 +2,8 @@
 .env.*
 !.env.example
 node_modules/
+.obsidian/
+.serena/
 .next/
 dist/
 coverage/
@@ -13,3 +15,23 @@ test-results/
 .agent/state/backups/
 *.local
 .DS_Store
+
+# Local agent state and developer tooling
+.codex/
+.agents/
+
+# Secret-bearing local and generated files
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.jks
+*.keystore
+*.secret
+*.token
+*.credentials
+*.dump
+*.sql.gz

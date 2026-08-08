@@ -21,6 +21,31 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.4.1
+          cache: pnpm
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          version: 0.11.25
+          python-version: "3.13"
+      - run: corepack enable
+      - run: sh scripts/install.sh
+      - run: sh scripts/lint.sh
+      - run: sh scripts/format-check.sh
+      - run: sh scripts/typecheck.sh
+      - run: sh scripts/test-unit.sh
+      - run: sh scripts/build.sh
+      - run: sh scripts/security-check.sh
+      - run: sh scripts/dependency-audit.sh
+
+  release-gate:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
     env:
       DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
@@ -60,7 +85,7 @@ jobs:
       - run: sh scripts/production-readiness-check.sh
 
   build-sign-deploy-staging:
-    needs: verify
+    needs: release-gate
     runs-on: ubuntu-latest
     timeout-minutes: 45
     environment: staging
@@ -72,6 +97,20 @@ jobs:
       FLY_APP_STAGING: ${{ vars.FLY_APP_STAGING }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validate immutable semantic release tag
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ env.RELEASE_TAG }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "release_tag must match vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          }
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "release_tag already exists and cannot be overwritten: $RELEASE_TAG" >&2
+            exit 1
+          fi
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
