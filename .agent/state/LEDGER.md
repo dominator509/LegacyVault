@@ -466,3 +466,13 @@
 2026-08-06T14:39:05Z | codex | EP-010 | EXTERNAL_DEFERRED | M2_ship_sentinel_release_tag_staging_and_production_remain_blocked_by_consolidated_external_requirements
 2026-08-06T14:39:05Z | codex | EP-010 | CONTINUATION_PASS | maximum_independent_engineering_complete_unit_59_integration_72_e2e_6_contract_39_operations_1727_cases_four_OCI_targets_local_release_migration_backup_restore_security_audit_smoke_DeepSeek_live_fire_ok
 2026-08-06T14:39:05Z | codex | EP-010 | LEASE_RELEASE | maximum_engineering_complete_exact_ship_gate_externally_blocked_no_release_or_green_tag
+2026-08-08T07:58:38Z | codex | EP-010 | SIG | github_verify_31246227608_exit_1_blank_OCR_config_owner_only_container_mount_and_clean_MinIO_bucket_missing
+2026-08-08T07:58:38Z | codex | EP-010 | HYPOTHESIS | normalize_blank_optional_OCR_match_Linux_container_UID_prepull_digest_and_bootstrap_loopback_bucket
+2026-08-08T07:58:39Z | codex | EP-010 | SIG | local_full_integration_notification_workflow_default_5000ms_timeout_exit_1
+2026-08-08T07:58:39Z | codex | EP-010 | HYPOTHESIS | retain_provider_timeout_and_set_finite_20000ms_end_to_end_test_bound
+2026-08-08T07:58:39Z | codex | EP-010 | CONTINUATION_PASS | six_hardening_passes_unit_63_integration_76_e2e_7_contract_39_operations_1727_cases_security_scan_one_low_fixed_build_audit_smoke_DeepSeek_k6_migration_backup_restore_release_rehearsal_ok
+2026-08-08T07:58:39Z | codex | EP-010 | OPERATOR_ASSERTION | counsel_policies_retention_pricing_insurance_incident_regions_data_broker_security_review_hosting_database_reported_complete_safe_references_and_probes_pending
+2026-08-08T07:58:39Z | codex | EP-010 | SIG | production_readiness_exit_1_missing_STRIPE_SECRET_KEY_EXT005
+2026-08-08T07:58:39Z | codex | EP-010 | SCHEDULER | NEXT_EP-000_due_to_preserved_external_release_blockers
+2026-08-08T08:01:40Z | codex | EP-010 | CI_PASS | github_run_31247202155_install_services_storage_OCR_migrations_lint_format_type_unit_63_integration_76_e2e_7_contract_build_security_audit_reality_smoke_ok
+2026-08-08T08:01:40Z | codex | EP-010 | LEASE_RELEASE | maximum_engineering_complete_exact_ship_gate_externally_blocked_no_green_or_release_tag
