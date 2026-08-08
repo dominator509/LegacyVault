@@ -157,4 +157,15 @@ describe("release artifacts", () => {
       [])
       expect(readiness).toContain(match[1]);
   });
+
+  it("authenticates the configured recurring Stripe Price during preflight", () => {
+    const probe = readFileSync(
+      path.join(root, "scripts/probes/stripe.sh"),
+      "utf8",
+    );
+    expect(probe).toContain("v1/balance");
+    expect(probe).toContain("v1/prices/$STRIPE_PRICE_ESSENTIAL");
+    expect(probe).toContain('.type == "recurring"');
+    expect(probe).toContain(".active == true");
+  });
 });

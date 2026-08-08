@@ -479,3 +479,6 @@
 2026-08-08T23:16:11Z | codex | EP-010 | EXTERNAL_PROBE_PASS | Stripe_test_account_authentication_balance_probe_passed_secret_and_webhook_values_ignored_local_only
 2026-08-08T23:16:11Z | codex | EP-010 | EXTERNAL_DEFERRED | STRIPE_PRICE_ESSENTIAL_portal_and_delivered_webhook_checkout_cancellation_refund_round_trip_pending
 2026-08-08T23:16:11Z | codex | EP-010 | SIG | full_preflight_exit_1_DATABASE_URL_credential_probe_failed_after_Stripe_probe_passed
+2026-08-08T23:32:13Z | codex | EP-010 | EXTERNAL_PROBE_PASS | Stripe_test_account_and_exact_active_recurring_Essential_Price_authenticated_no_values_logged
+2026-08-08T23:32:13Z | codex | EP-010 | EXTERNAL_DEFERRED | Stripe_portal_delivered_webhook_checkout_cancellation_refund_round_trip_pending
+2026-08-08T23:32:13Z | codex | EP-010 | SIG | full_preflight_exit_1_DATABASE_URL_credential_probe_failed_after_Stripe_account_and_Price_passed
