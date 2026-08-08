@@ -74,6 +74,15 @@ const repositorySource = readFileSync(
   "packages/database/src/repository.ts",
   "utf8",
 );
+const identitySource = readFileSync("packages/auth/src/identity.ts", "utf8");
+if (
+  !identitySource.includes("and auth_user_id=$2 order by id limit 2") ||
+  !identitySource.includes("[requestedHouseholdId ?? null, authUserId]")
+) {
+  failures.push(
+    "membership resolution lacks an application-layer authenticated-user predicate",
+  );
+}
 if (
   !repositorySource.includes("payload_encrypted") ||
   /insert into reports[^\n]+claims[^\n]+JSON\.stringify\(input\.claims\)/u.test(
