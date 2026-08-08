@@ -77,7 +77,22 @@ export class DeepSeekProvider implements AiProvider {
   constructor(
     private readonly config: DeepSeekConfig,
     private readonly transport: typeof fetch = fetch,
-  ) {}
+  ) {
+    const endpoint = new URL(config.baseUrl);
+    const approvedProductionHost =
+      endpoint.protocol === "https:" &&
+      endpoint.hostname === "api.deepseek.com" &&
+      (endpoint.port === "" || endpoint.port === "443") &&
+      endpoint.username === "" &&
+      endpoint.password === "";
+    const approvedContractEndpoint =
+      endpoint.protocol === "http:" &&
+      new Set(["127.0.0.1", "localhost", "::1"]).has(endpoint.hostname) &&
+      endpoint.username === "" &&
+      endpoint.password === "";
+    if (!approvedProductionHost && !approvedContractEndpoint)
+      throw new Error("DeepSeek endpoint is not approved");
+  }
   readiness() {
     if (!this.config.apiKey)
       return { configured: false, reason: "missing-api-key" };
@@ -124,16 +139,17 @@ export class DeepSeekProvider implements AiProvider {
             signal: controller.signal,
           },
         );
-        if (
-          (response.status === 429 || response.status >= 500) &&
-          attempt < this.config.maxRetries
-        ) {
+        if (response.status === 429 || response.status >= 500) {
           const retryAfter = response.headers.get("retry-after");
           await response.body?.cancel();
-          await new Promise((resolve) =>
-            setTimeout(resolve, retryDelayMs(retryAfter, attempt)),
-          );
-          continue;
+          if (attempt < this.config.maxRetries) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, retryDelayMs(retryAfter, attempt)),
+            );
+            continue;
+          }
+          lastError = new Error(`DeepSeek HTTP ${response.status}`);
+          break;
         }
         if (!response.ok)
           throw new ProviderResponseError(`DeepSeek HTTP ${response.status}`);
@@ -157,14 +173,30 @@ export class DeepSeekProvider implements AiProvider {
             `DeepSeek response content is missing (${body.choices?.[0]?.finish_reason ?? "unknown"})`,
           );
         this.#failureCount = 0;
+        const inputTokens = usageCounter(
+          body.usage?.prompt_tokens,
+          "prompt_tokens",
+        );
+        const outputTokens = usageCounter(
+          body.usage?.completion_tokens,
+          "completion_tokens",
+        );
+        const cacheHitTokens = usageCounter(
+          body.usage?.prompt_cache_hit_tokens,
+          "prompt_cache_hit_tokens",
+        );
+        const cacheMissTokens = usageCounter(
+          body.usage?.prompt_cache_miss_tokens,
+          "prompt_cache_miss_tokens",
+        );
         return {
           content,
           model: body.model ?? request.model,
           usage: {
-            inputTokens: body.usage?.prompt_tokens ?? 0,
-            outputTokens: body.usage?.completion_tokens ?? 0,
-            cacheHitTokens: body.usage?.prompt_cache_hit_tokens ?? 0,
-            cacheMissTokens: body.usage?.prompt_cache_miss_tokens ?? 0,
+            inputTokens,
+            outputTokens,
+            cacheHitTokens,
+            cacheMissTokens,
           },
           retryCount: attempt,
           ...(body.id ? { requestId: body.id } : {}),
@@ -183,6 +215,13 @@ export class DeepSeekProvider implements AiProvider {
       this.config.maxRetries,
     );
   }
+}
+
+function usageCounter(value: number | undefined, field: string): number {
+  if (value === undefined) return 0;
+  if (!Number.isSafeInteger(value) || value < 0)
+    throw new ProviderResponseError(`DeepSeek ${field} is invalid`);
+  return value;
 }
 
 function retryDelayMs(retryAfter: string | null, attempt: number): number {

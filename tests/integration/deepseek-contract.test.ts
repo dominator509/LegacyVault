@@ -18,6 +18,19 @@ afterEach(async () =>
 );
 
 describe("DeepSeek HTTP contract", () => {
+  it("rejects non-loopback endpoints outside the approved provider host", () => {
+    expect(
+      () =>
+        new DeepSeekProvider({
+          apiKey: "contract-test-key",
+          baseUrl: "https://deepseek.attacker.example/",
+          model: "deepseek-contract",
+          timeoutMs: 2_000,
+          maxRetries: 0,
+        }),
+    ).toThrow("DeepSeek endpoint is not approved");
+  });
+
   it("constructs authenticated structured requests and validates usage fields", async () => {
     let receivedAuthorization = "";
     let receivedBody: unknown;
@@ -124,5 +137,73 @@ describe("DeepSeek HTTP contract", () => {
       }),
     ).resolves.toMatchObject({ content: "{}", retryCount: 1 });
     expect(attempts).toBe(2);
+  });
+
+  it("opens the circuit after exhausted transient failures", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(503);
+      response.end();
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const provider = new DeepSeekProvider({
+      apiKey: "contract-test-key",
+      baseUrl: `http://127.0.0.1:${address.port}/`,
+      model: "deepseek-contract",
+      timeoutMs: 2_000,
+      maxRetries: 0,
+    });
+    const request = {
+      stablePrefix: "policy",
+      volatileContent: "content",
+      model: "deepseek-contract",
+      mode: "standard" as const,
+      maxOutputTokens: 50,
+    };
+    for (let attempt = 0; attempt < 3; attempt += 1)
+      await expect(provider.invoke(request)).rejects.toMatchObject({
+        name: "ProviderUnavailableError",
+      });
+    expect(provider.readiness()).toEqual({
+      configured: false,
+      reason: "circuit-open",
+    });
+  });
+
+  it("rejects malformed usage counters", async () => {
+    const server = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          model: "deepseek-contract",
+          choices: [{ message: { content: "{}" } }],
+          usage: { prompt_tokens: -1 },
+        }),
+      );
+    });
+    servers.push(server);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const address = server.address() as AddressInfo;
+    const provider = new DeepSeekProvider({
+      apiKey: "contract-test-key",
+      baseUrl: `http://127.0.0.1:${address.port}/`,
+      model: "deepseek-contract",
+      timeoutMs: 2_000,
+      maxRetries: 0,
+    });
+    await expect(
+      provider.invoke({
+        stablePrefix: "policy",
+        volatileContent: "content",
+        model: "deepseek-contract",
+        mode: "standard",
+        maxOutputTokens: 50,
+      }),
+    ).rejects.toMatchObject({ name: "ProviderResponseError" });
   });
 });
