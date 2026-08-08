@@ -37,6 +37,9 @@ describe("release artifacts", () => {
     expect(workflow).toContain("sh scripts/generate-local-env.sh");
     expect(workflow).toContain("docker compose up -d --wait");
     expect(workflow).toContain(
+      "pnpm exec tsx scripts/bootstrap-local-storage.ts",
+    );
+    expect(workflow).toContain(
       "pnpm exec playwright install --with-deps chromium",
     );
     for (const gate of [

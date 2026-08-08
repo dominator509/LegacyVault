@@ -28,6 +28,7 @@ jobs:
       - run: sh scripts/install.sh
       - run: sh scripts/generate-local-env.sh
       - run: docker compose up -d --wait
+      - run: pnpm exec tsx scripts/bootstrap-local-storage.ts
       - run: docker pull "$OCR_IMAGE"
       - run: pnpm db:migrate
       - run: pnpm exec playwright install --with-deps chromium
