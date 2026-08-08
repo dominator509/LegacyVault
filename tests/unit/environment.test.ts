@@ -67,6 +67,18 @@ describe("environment", () => {
     });
   });
 
+  it("normalizes disabled optional OCR settings from generated env files", () => {
+    expect(
+      loadEnvironment({
+        OCR_EXECUTABLE: "",
+        OCR_PYTHON_EXECUTABLE: "",
+      }),
+    ).toMatchObject({
+      OCR_EXECUTABLE: undefined,
+      OCR_PYTHON_EXECUTABLE: undefined,
+    });
+  });
+
   it("requires encrypted production transports and the approved AI host", () => {
     expect(() => loadEnvironment(productionEnvironment)).not.toThrow();
     for (const override of [

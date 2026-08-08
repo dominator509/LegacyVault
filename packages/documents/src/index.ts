@@ -412,6 +412,7 @@ export class DockerOcrMyPdfAdapter {
         "2",
         "--tmpfs",
         "/tmp:rw,noexec,nosuid,size=512m",
+        ...hostContainerUserArguments(),
         "--volume",
         `${directory}:/work`,
         "--workdir",
@@ -451,6 +452,15 @@ export class DockerOcrMyPdfAdapter {
       await rm(directory, { recursive: true, force: true });
     }
   }
+}
+
+function hostContainerUserArguments(): string[] {
+  if (
+    typeof process.getuid !== "function" ||
+    typeof process.getgid !== "function"
+  )
+    return [];
+  return ["--user", `${process.getuid()}:${process.getgid()}`];
 }
 
 export class DocumentObjectStore {
