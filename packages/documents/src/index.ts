@@ -481,6 +481,12 @@ export class DocumentObjectStore {
     }
   }
 
+  async healthCheck(): Promise<void> {
+    await this.#client.send(
+      new HeadBucketCommand({ Bucket: this.config.bucket }),
+    );
+  }
+
   createObjectKey(): string {
     return `quarantine/${randomUUID()}`;
   }

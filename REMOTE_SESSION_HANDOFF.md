@@ -119,7 +119,8 @@ sh scripts/staging-live-fire.sh "https://<exact-named-staging-app>.fly.dev"
 Production deployment remains the exact manual command in `DEPLOYMENT.md`:
 
 ```sh
-fly deploy --app "$FLY_APP_PRODUCTION" --image "ghcr.io/$GHCR_OWNER/legacy-vault:$RELEASE_TAG" --strategy rolling
+cosign verify "ghcr.io/$GHCR_OWNER/legacy-vault@$RELEASE_IMAGE_DIGEST"
+fly deploy --app "$FLY_APP_PRODUCTION" --image "ghcr.io/$GHCR_OWNER/legacy-vault@$RELEASE_IMAGE_DIGEST" --strategy rolling
 ```
 
 Post-deployment smoke/live-fire use the two staging scripts with the exact production HTTPS URL. Rollback first verifies and then deploys the recorded compatible digest:

@@ -96,6 +96,7 @@ jobs:
       REGISTRY: ghcr.io
       IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/legacy-vault
       RELEASE_TAG: ${{ inputs.release_tag }}
+      IMAGE_BUILD_TAG: ${{ inputs.release_tag }}-${{ github.sha }}-${{ github.run_id }}
       FLY_APP_STAGING: ${{ vars.FLY_APP_STAGING }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -127,28 +128,28 @@ jobs:
           context: .
           target: api
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.RELEASE_TAG }}
+          tags: ${{ env.IMAGE_PREFIX }}-api:${{ env.IMAGE_BUILD_TAG }}
       - id: web
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: web
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-web:${{ env.RELEASE_TAG }}
+          tags: ${{ env.IMAGE_PREFIX }}-web:${{ env.IMAGE_BUILD_TAG }}
       - id: worker
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: worker
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.RELEASE_TAG }}
+          tags: ${{ env.IMAGE_PREFIX }}-worker:${{ env.IMAGE_BUILD_TAG }}
       - id: release
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: release
           push: true
-          tags: ${{ env.IMAGE_PREFIX }}:${{ env.RELEASE_TAG }}
+          tags: ${{ env.IMAGE_PREFIX }}:${{ env.IMAGE_BUILD_TAG }}
       - name: Sign immutable images
         run: |
           cosign sign --yes "${IMAGE_PREFIX}-api@${{ steps.api.outputs.digest }}"
@@ -163,3 +164,19 @@ jobs:
         run: |
           sh scripts/staging-smoke.sh "https://${FLY_APP_STAGING}.fly.dev"
           sh scripts/staging-live-fire.sh "https://${FLY_APP_STAGING}.fly.dev"
+
+  publish-release-tag:
+    needs: build-sign-deploy-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish immutable release tag after staging proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: >-
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs"
+          -f "ref=refs/tags/${RELEASE_TAG}"
+          -f "sha=${GITHUB_SHA}"

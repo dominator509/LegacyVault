@@ -48,6 +48,15 @@ describe("release artifacts", () => {
     expect(workflow).toMatch(
       /name: Deploy named staging app by digest\n        env:\n          FLY_API_TOKEN:/u,
     );
+    expect(workflow).toContain(
+      "IMAGE_BUILD_TAG: ${{ inputs.release_tag }}-${{ github.sha }}-${{ github.run_id }}",
+    );
+    expect(workflow).toContain(
+      'gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs"',
+    );
+    expect(workflow.indexOf("Staging smoke and live-fire")).toBeLessThan(
+      workflow.indexOf("Publish immutable release tag after staging proof"),
+    );
   });
 
   it("materializes the CI allowlist without printing secret values", () => {

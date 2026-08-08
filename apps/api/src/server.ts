@@ -35,6 +35,10 @@ import {
 
 export interface ServerDependencies {
   observability?: ObservabilityRuntime;
+  readiness?: () => Promise<{
+    ready: boolean;
+    dependencies: Record<string, "ready" | "unavailable">;
+  }>;
   repository: VaultRepository;
   resolveIdentity: IdentityResolver;
   resolveAccount?: AccountResolver;
@@ -246,6 +250,7 @@ export function buildServer(dependencies?: ServerDependencies) {
   if (
     environment.NODE_ENV === "production" &&
     (!dependencies?.auth ||
+      !dependencies.readiness ||
       !dependencies.authorizeIdentity ||
       !dependencies.startPortableExport ||
       !dependencies.getPortableExport ||
@@ -375,18 +380,46 @@ export function buildServer(dependencies?: ServerDependencies) {
 
   server.get("/health/live", async () => ({ status: "live" as const }));
   server.get("/health/ready", async (_request, reply) => {
-    if (!environment.LOCAL_ENGINEERING_MODE && !environment.DATABASE_URL) {
+    if (!dependencies?.readiness) {
+      if (environment.LOCAL_ENGINEERING_MODE || environment.DATABASE_URL)
+        return { status: "ready" as const };
       return reply
         .code(503)
         .send({ status: "not-ready", reason: "database-unconfigured" });
     }
-    return { status: "ready" as const };
+    try {
+      const readiness = await dependencies.readiness();
+      return readiness.ready
+        ? { status: "ready" as const }
+        : reply.code(503).send({
+            status: "not-ready",
+            reason: "required-dependency-unavailable",
+          });
+    } catch {
+      return reply.code(503).send({
+        status: "not-ready",
+        reason: "required-dependency-unavailable",
+      });
+    }
   });
-  server.get("/health/dependencies", async () => ({
-    status: environment.LOCAL_ENGINEERING_MODE ? "degraded" : "configured",
-    externalVerificationDeferred: environment.LOCAL_ENGINEERING_MODE,
-    serviceRoutesConfigured: Boolean(dependencies),
-  }));
+  server.get("/health/dependencies", async () => {
+    try {
+      const readiness = await dependencies?.readiness?.();
+      return {
+        status: readiness?.ready ? "ready" : "degraded",
+        dependencies: readiness?.dependencies ?? {},
+        externalVerificationDeferred: environment.LOCAL_ENGINEERING_MODE,
+        serviceRoutesConfigured: Boolean(dependencies),
+      };
+    } catch {
+      return {
+        status: "degraded",
+        dependencies: {},
+        externalVerificationDeferred: environment.LOCAL_ENGINEERING_MODE,
+        serviceRoutesConfigured: Boolean(dependencies),
+      };
+    }
+  });
   server.get(
     "/openapi.json",
     { schema: { hide: true } },

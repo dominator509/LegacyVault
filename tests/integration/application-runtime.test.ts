@@ -69,6 +69,34 @@ afterAll(async () => {
 });
 
 describe("composed application runtime", () => {
+  it("reports real required dependencies ready", async () => {
+    const readiness = await runtime.dependencies.readiness?.();
+    if (!readiness) throw new Error("runtime readiness probe is missing");
+    expect(readiness).toEqual({
+      ready: true,
+      dependencies: {
+        database: "ready",
+        queue: "ready",
+        object_storage: "ready",
+      },
+    });
+    const readyResponse = await server.inject({
+      method: "GET",
+      url: "/health/ready",
+    });
+    expect(readyResponse.statusCode).toBe(200);
+    expect(readyResponse.json()).toEqual({ status: "ready" });
+    const dependencyResponse = await server.inject({
+      method: "GET",
+      url: "/health/dependencies",
+    });
+    expect(dependencyResponse.statusCode).toBe(200);
+    expect(dependencyResponse.json()).toMatchObject({
+      status: "ready",
+      dependencies: readiness.dependencies,
+    });
+  });
+
   it("persists a real signup and delivers its verification message through local SMTP", async () => {
     const suffix = randomUUID();
     const email = `runtime-${suffix}@example.test`;
