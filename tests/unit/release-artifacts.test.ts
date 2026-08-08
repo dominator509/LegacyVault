@@ -27,6 +27,33 @@ describe("release artifacts", () => {
     expect(workflows[0]).not.toContain("environment: production");
   });
 
+  it("keeps pull-request CI local and leaves external preflight to the ship gate", () => {
+    const workflow = readFileSync(
+      path.join(root, ".github/workflows/verify.yml"),
+      "utf8",
+    );
+    expect(workflow).not.toContain("sh scripts/verify.sh");
+    expect(workflow).not.toMatch(/\$\{\{\s*secrets\./u);
+    expect(workflow).toContain("sh scripts/generate-local-env.sh");
+    expect(workflow).toContain("docker compose up -d --wait");
+    expect(workflow).toContain(
+      "pnpm exec playwright install --with-deps chromium",
+    );
+    for (const gate of [
+      "test-unit.sh",
+      "test-integration.sh",
+      "test-e2e.sh",
+      "contract-test.sh",
+      "security-check.sh",
+      "dependency-audit.sh",
+      "reality-gate.sh",
+      "smoke-test.sh",
+    ])
+      expect(workflow).toContain(gate);
+    expect(workflow).toContain("if: always()");
+    expect(workflow).toContain("docker compose down");
+  });
+
   it("limits release credentials and elevated permissions to required steps", () => {
     const workflow = readFileSync(
       path.join(root, ".github/workflows/release.yml"),
