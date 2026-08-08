@@ -476,3 +476,6 @@
 2026-08-08T07:58:39Z | codex | EP-010 | SCHEDULER | NEXT_EP-000_due_to_preserved_external_release_blockers
 2026-08-08T08:01:40Z | codex | EP-010 | CI_PASS | github_run_31247202155_install_services_storage_OCR_migrations_lint_format_type_unit_63_integration_76_e2e_7_contract_build_security_audit_reality_smoke_ok
 2026-08-08T08:01:40Z | codex | EP-010 | LEASE_RELEASE | maximum_engineering_complete_exact_ship_gate_externally_blocked_no_green_or_release_tag
+2026-08-08T23:16:11Z | codex | EP-010 | EXTERNAL_PROBE_PASS | Stripe_test_account_authentication_balance_probe_passed_secret_and_webhook_values_ignored_local_only
+2026-08-08T23:16:11Z | codex | EP-010 | EXTERNAL_DEFERRED | STRIPE_PRICE_ESSENTIAL_portal_and_delivered_webhook_checkout_cancellation_refund_round_trip_pending
+2026-08-08T23:16:11Z | codex | EP-010 | SIG | full_preflight_exit_1_DATABASE_URL_credential_probe_failed_after_Stripe_probe_passed
