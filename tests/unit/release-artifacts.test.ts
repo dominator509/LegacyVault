@@ -168,4 +168,43 @@ describe("release artifacts", () => {
     expect(probe).toContain('.type == "recurring"');
     expect(probe).toContain(".active == true");
   });
+
+  it("places PostgreSQL probe options before connection URLs for Windows psql", () => {
+    for (const name of ["database_url.sh", "test_database_url.sh"]) {
+      const probe = readFileSync(
+        path.join(root, "scripts/probes", name),
+        "utf8",
+      );
+      expect(probe).toMatch(
+        /"\$psql_bin" -v ON_ERROR_STOP=1 -Atqc "[^"]+" "\$(?:TEST_)?DATABASE_URL"/u,
+      );
+    }
+    const infrastructureTest = readFileSync(
+      path.join(root, "tests/integration/local-infrastructure.test.ts"),
+      "utf8",
+    );
+    expect(infrastructureTest).toContain(
+      '["-Atqc", "select current_database()", local.DATABASE_URL ?? ""]',
+    );
+    expect(infrastructureTest).toContain(
+      '["-Atqc", "select current_database()", local.TEST_DATABASE_URL ?? ""]',
+    );
+  });
+
+  it("keeps Stripe sandbox live-fire synthetic and self-cleaning", () => {
+    const test = readFileSync(
+      path.join(root, "tests/live-fire/stripe-sandbox.test.ts"),
+      "utf8",
+    );
+    const command = readFileSync(
+      path.join(root, "scripts/stripe-live-fire.sh"),
+      "utf8",
+    );
+    expect(test).toContain("synthetic-live-fire-");
+    expect(test).toContain("/expire");
+    expect(test).toContain("metadata[legacy_test_only]");
+    expect(test).toContain("v1/customers/${customerId}");
+    expect(test).toContain("requires a test-mode secret key");
+    expect(command).toContain("tests/live-fire/stripe-sandbox.test.ts");
+  });
 });

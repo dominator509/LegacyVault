@@ -482,3 +482,14 @@
 2026-08-08T23:32:13Z | codex | EP-010 | EXTERNAL_PROBE_PASS | Stripe_test_account_and_exact_active_recurring_Essential_Price_authenticated_no_values_logged
 2026-08-08T23:32:13Z | codex | EP-010 | EXTERNAL_DEFERRED | Stripe_portal_delivered_webhook_checkout_cancellation_refund_round_trip_pending
 2026-08-08T23:32:13Z | codex | EP-010 | SIG | full_preflight_exit_1_DATABASE_URL_credential_probe_failed_after_Stripe_account_and_Price_passed
+2026-08-09T00:27:54Z | codex | EP-010 | SIG | stripe_portal_cleanup_first_attempt_exit_1_used_POST_instead_of_DELETE_one_synthetic_customer_then_removed
+2026-08-09T00:27:54Z | codex | EP-010 | DATABASE_PROBE_PASS | local_application_and_isolated_test_roles_authenticated_migrations_current
+2026-08-09T00:27:54Z | codex | EP-010 | BACKUP_RESTORE_PASS | migrations_idempotent_checksummed_backup_restore_comparison_ok
+2026-08-09T00:27:55Z | codex | EP-010 | STRIPE_LIVE_FIRE_PASS | synthetic_checkout_create_retrieve_expire_and_disposable_customer_portal_delete_2_tests_ok
+2026-08-09T00:27:55Z | codex | EP-010 | SIG | full_preflight_exit_1_missing_RESEND_API_KEY_EXT006_after_database_Redis_DeepSeek_R2_Stripe_passed
+2026-08-09T00:27:55Z | codex | EP-010 | EXTERNAL_DEFERRED | delivered_Stripe_webhooks_paid_lifecycle_and_provider_bound_DeepSeek_rerun_require_remaining_configuration_or_informed_approval
+2026-08-09T00:30:56Z | codex | EP-010 | SIG | full_integration_exit_1_Windows_psql_options_after_URL_and_parallel_authorizer_timeout
+2026-08-09T00:30:56Z | codex | EP-010 | HYPOTHESIS | move_infrastructure_test_psql_options_before_URL_then_rerun_full_integration_to_distinguish_secondary_contention_timeout
+2026-08-09T00:31:50Z | codex | EP-010 | INTEGRATION_PASS | Windows_psql_order_fixed_real_database_runtime_76_of_76_ok
+2026-08-09T00:33:21Z | codex | EP-010 | CONTINUATION_PASS | local_database_roles_migrations_backup_restore_Stripe_checkout_portal_live_fire_unit_66_integration_76_security_audit_ok
+2026-08-09T00:33:21Z | codex | EP-010 | SIG | exact_preflight_exit_1_missing_RESEND_API_KEY_EXT006

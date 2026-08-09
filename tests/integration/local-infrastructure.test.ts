@@ -57,12 +57,12 @@ describe("real local infrastructure", () => {
     };
     const applicationDatabase = execFileSync(
       psqlPath(),
-      [local.DATABASE_URL ?? "", "-Atqc", "select current_database()"],
+      ["-Atqc", "select current_database()", local.DATABASE_URL ?? ""],
       options,
     ).trim();
     const testDatabase = execFileSync(
       psqlPath(),
-      [local.TEST_DATABASE_URL ?? "", "-Atqc", "select current_database()"],
+      ["-Atqc", "select current_database()", local.TEST_DATABASE_URL ?? ""],
       options,
     ).trim();
     expect(applicationDatabase).toBe("legacy_vault");
