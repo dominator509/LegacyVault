@@ -497,3 +497,8 @@
 2026-08-09T00:44:42Z | codex | EP-010 | HYPOTHESIS | use_official_emails_by_id_path_matching_production_adapter_base
 2026-08-09T00:47:31Z | codex | EP-010 | RESEND_LIVE_FIRE_PASS | authenticated_domains_probe_and_provider_owned_synthetic_send_retrieve_ok_key_ignored
 2026-08-09T00:47:31Z | codex | EP-010 | SIG | exact_preflight_exit_1_missing_TURNSTILE_SITE_KEY_EXT007
+2026-08-09T03:06:16Z | codex | EP-010 | SIG | Turnstile_live_fire_precheck_exit_1_format_only
+2026-08-09T03:08:22Z | codex | EP-010 | SIG | Turnstile_dummy_always_pass_secret_returned_success_for_invalid_string_probe_expectation_corrected_to_documented_pair_semantics
+2026-08-09T03:09:09Z | codex | EP-010 | SIG | Turnstile_direct_dummy_token_hostname_example_com_not_localhost_removed_non_authoritative_hostname_assertion
+2026-08-09T03:12:21Z | codex | EP-010 | TURNSTILE_TEST_PASS | official_public_pair_hardened_probe_and_real_Siteverify_always_pass_always_fail_ok
+2026-08-09T03:12:21Z | codex | EP-010 | SIG | exact_preflight_exit_1_missing_FLY_API_TOKEN_EXT009_after_public_test_Turnstile_passed

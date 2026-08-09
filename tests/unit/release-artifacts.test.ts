@@ -223,4 +223,36 @@ describe("release artifacts", () => {
     expect(test).toContain("emails/${sent.id}");
     expect(command).toContain("tests/live-fire/resend-sandbox.test.ts");
   });
+
+  it("keeps Turnstile live-fire deterministic and test-only", () => {
+    const test = readFileSync(
+      path.join(root, "tests/live-fire/turnstile-sandbox.test.ts"),
+      "utf8",
+    );
+    const probe = readFileSync(
+      path.join(root, "scripts/probes/turnstile.sh"),
+      "utf8",
+    );
+    const localEnvironment = readFileSync(
+      path.join(root, "scripts/generate-local-env.sh"),
+      "utf8",
+    );
+    const command = readFileSync(
+      path.join(root, "scripts/turnstile-live-fire.sh"),
+      "utf8",
+    );
+    expect(test).toContain("XXXX.DUMMY.TOKEN.XXXX");
+    expect(test).toContain("failingTestingSecret");
+    expect(test).toContain("requires Cloudflare's public testing sitekey");
+    expect(test).toContain("requires Cloudflare's public testing secret");
+    expect(probe).toContain("XXXX.DUMMY.TOKEN.XXXX");
+    expect(probe).toContain('index("invalid-input-secret") | not');
+    expect(localEnvironment).toContain(
+      "TURNSTILE_SITE_KEY=1x00000000000000000000AA",
+    );
+    expect(localEnvironment).toContain(
+      "TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA",
+    );
+    expect(command).toContain("tests/live-fire/turnstile-sandbox.test.ts");
+  });
 });
