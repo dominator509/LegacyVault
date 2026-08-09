@@ -207,4 +207,20 @@ describe("release artifacts", () => {
     expect(test).toContain("requires a test-mode secret key");
     expect(command).toContain("tests/live-fire/stripe-sandbox.test.ts");
   });
+
+  it("keeps Resend live-fire on provider-owned synthetic addresses", () => {
+    const test = readFileSync(
+      path.join(root, "tests/live-fire/resend-sandbox.test.ts"),
+      "utf8",
+    );
+    const command = readFileSync(
+      path.join(root, "scripts/resend-live-fire.sh"),
+      "utf8",
+    );
+    expect(test).toContain("Legacy Vault <onboarding@resend.dev>");
+    expect(test).toContain("delivered+legacyvault-");
+    expect(test).toContain("LegacyVault synthetic Resend live fire");
+    expect(test).toContain("emails/${sent.id}");
+    expect(command).toContain("tests/live-fire/resend-sandbox.test.ts");
+  });
 });

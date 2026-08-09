@@ -493,3 +493,7 @@
 2026-08-09T00:31:50Z | codex | EP-010 | INTEGRATION_PASS | Windows_psql_order_fixed_real_database_runtime_76_of_76_ok
 2026-08-09T00:33:21Z | codex | EP-010 | CONTINUATION_PASS | local_database_roles_migrations_backup_restore_Stripe_checkout_portal_live_fire_unit_66_integration_76_security_audit_ok
 2026-08-09T00:33:21Z | codex | EP-010 | SIG | exact_preflight_exit_1_missing_RESEND_API_KEY_EXT006
+2026-08-09T00:44:42Z | codex | EP-010 | SIG | Resend_send_accepted_then_retrieve_wrong_v1_path_HTTP_405_exit_1
+2026-08-09T00:44:42Z | codex | EP-010 | HYPOTHESIS | use_official_emails_by_id_path_matching_production_adapter_base
+2026-08-09T00:47:31Z | codex | EP-010 | RESEND_LIVE_FIRE_PASS | authenticated_domains_probe_and_provider_owned_synthetic_send_retrieve_ok_key_ignored
+2026-08-09T00:47:31Z | codex | EP-010 | SIG | exact_preflight_exit_1_missing_TURNSTILE_SITE_KEY_EXT007
