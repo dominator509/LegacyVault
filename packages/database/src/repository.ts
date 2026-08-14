@@ -286,6 +286,10 @@ export class VaultRepository {
     await this.#pool.end();
   }
 
+  async healthCheck(): Promise<void> {
+    await this.#pool.query("select 1");
+  }
+
   async withTenant<T>(
     context: TenantContext,
     operation: (client: pg.PoolClient) => Promise<T>,

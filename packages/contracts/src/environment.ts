@@ -9,6 +9,15 @@ const optionalNonEmptyString = z.preprocess(
   z.string().min(1).optional(),
 );
 
+function parsedUrl(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
+  try {
+    return new URL(value);
+  } catch {
+    return undefined;
+  }
+}
+
 const environmentSchema = z
   .object({
     NODE_ENV: z
@@ -46,8 +55,8 @@ const environmentSchema = z
     R2_ENDPOINT: z.string().url().optional(),
     CLAMAV_HOST: z.string().min(1).optional(),
     CLAMAV_PORT: z.coerce.number().int().min(1).max(65_535).optional(),
-    OCR_EXECUTABLE: z.string().min(1).optional(),
-    OCR_PYTHON_EXECUTABLE: z.string().min(1).optional(),
+    OCR_EXECUTABLE: optionalNonEmptyString,
+    OCR_PYTHON_EXECUTABLE: optionalNonEmptyString,
     DELETION_RECOVERY_DAYS: z.coerce.number().int().min(1).max(365).optional(),
     BACKUP_RETENTION_DAYS: z.coerce.number().int().min(1).max(365).optional(),
     SENTRY_DSN: optionalUrl,
@@ -109,6 +118,54 @@ const environmentSchema = z
           message: "required in production",
         });
     }
+    if (value.NODE_ENV !== "production") return;
+    for (const field of [
+      "API_BASE_URL",
+      "APP_BASE_URL",
+      "DEEPSEEK_BASE_URL",
+      "R2_ENDPOINT",
+    ] as const) {
+      const endpoint = parsedUrl(value[field]);
+      if (endpoint && endpoint.protocol !== "https:")
+        context.addIssue({
+          code: "custom",
+          path: [field],
+          message: "must use HTTPS in production",
+        });
+    }
+    const deepSeekEndpoint = parsedUrl(value.DEEPSEEK_BASE_URL);
+    if (
+      deepSeekEndpoint &&
+      (deepSeekEndpoint.hostname !== "api.deepseek.com" ||
+        (deepSeekEndpoint.port !== "" && deepSeekEndpoint.port !== "443") ||
+        deepSeekEndpoint.username !== "" ||
+        deepSeekEndpoint.password !== "")
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["DEEPSEEK_BASE_URL"],
+        message: "must use the approved DeepSeek API host",
+      });
+    const redisEndpoint = parsedUrl(value.REDIS_URL);
+    if (redisEndpoint && redisEndpoint.protocol !== "rediss:")
+      context.addIssue({
+        code: "custom",
+        path: ["REDIS_URL"],
+        message: "must use TLS in production",
+      });
+    const databaseEndpoint = parsedUrl(value.DATABASE_URL);
+    if (
+      databaseEndpoint &&
+      (!new Set(["postgres:", "postgresql:"]).has(databaseEndpoint.protocol) ||
+        !new Set(["require", "verify-ca", "verify-full"]).has(
+          databaseEndpoint.searchParams.get("sslmode") ?? "",
+        ))
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["DATABASE_URL"],
+        message: "must use PostgreSQL with TLS required in production",
+      });
   });
 
 export type Environment = z.infer<typeof environmentSchema>;

@@ -412,6 +412,7 @@ export class DockerOcrMyPdfAdapter {
         "2",
         "--tmpfs",
         "/tmp:rw,noexec,nosuid,size=512m",
+        ...hostContainerUserArguments(),
         "--volume",
         `${directory}:/work`,
         "--workdir",
@@ -453,6 +454,15 @@ export class DockerOcrMyPdfAdapter {
   }
 }
 
+function hostContainerUserArguments(): string[] {
+  if (
+    typeof process.getuid !== "function" ||
+    typeof process.getgid !== "function"
+  )
+    return [];
+  return ["--user", `${process.getuid()}:${process.getgid()}`];
+}
+
 export class DocumentObjectStore {
   readonly #client: S3Client;
   constructor(private readonly config: ObjectStoreConfig) {
@@ -479,6 +489,12 @@ export class DocumentObjectStore {
         new CreateBucketCommand({ Bucket: this.config.bucket }),
       );
     }
+  }
+
+  async healthCheck(): Promise<void> {
+    await this.#client.send(
+      new HeadBucketCommand({ Bucket: this.config.bucket }),
+    );
   }
 
   createObjectKey(): string {

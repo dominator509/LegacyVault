@@ -109,6 +109,23 @@ afterAll(async () => {
 });
 
 describe("real browser outcomes and accessibility", () => {
+  it("serves restrictive browser security headers", async () => {
+    const response = await fetch(baseUrl);
+    expect(response.headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
+    expect(response.headers.get("content-security-policy")).toContain(
+      "connect-src 'self'",
+    );
+    expect(response.headers.get("x-frame-options")).toBe("DENY");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(response.headers.get("strict-transport-security")).toContain(
+      "max-age=63072000",
+    );
+    expect(response.headers.get("permissions-policy")).toContain("camera=()");
+  });
+
   it("has no serious or critical axe violations on primary public flows", async () => {
     if (!browser) throw new Error("browser unavailable");
     const context = await browser.newContext();

@@ -118,8 +118,8 @@ export class MembershipIdentityStore {
         person_id: string;
         role: Role;
       }>(
-        "select id,organization_id,household_id,person_id,role from memberships where active=1 and ($1::uuid is null or household_id=$1::uuid) order by id limit 2",
-        [requestedHouseholdId ?? null],
+        "select id,organization_id,household_id,person_id,role from memberships where active=1 and ($1::uuid is null or household_id=$1::uuid) and auth_user_id=$2 order by id limit 2",
+        [requestedHouseholdId ?? null, authUserId],
       );
       if (result.rows.length === 0)
         throw new AuthenticationRequiredError("membership unavailable");

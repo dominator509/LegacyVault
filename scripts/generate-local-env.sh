@@ -38,7 +38,7 @@ export_key=$(openssl genpkey -algorithm ED25519 -outform DER 2>/dev/null | opens
   printf '%s\n' 'DEEPSEEK_API_KEY=' 'DEEPSEEK_BASE_URL=https://api.deepseek.com' 'DEEPSEEK_MODEL=deepseek-v4-flash'
   printf '%s\n' 'STRIPE_SECRET_KEY=' 'STRIPE_WEBHOOK_SECRET=' 'STRIPE_PRICE_ESSENTIAL='
   printf '%s\n' 'RESEND_API_KEY=' 'EMAIL_FROM="Legacy Vault <notices@localhost.invalid>"'
-  printf '%s\n' 'TURNSTILE_SITE_KEY=' 'TURNSTILE_SECRET_KEY=' 'SENTRY_DSN='
+  printf '%s\n' 'TURNSTILE_SITE_KEY=1x00000000000000000000AA' 'TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA' 'SENTRY_DSN='
   printf '%s\n' 'FLY_API_TOKEN=' 'FLY_APP_STAGING=' 'FLY_APP_PRODUCTION=' 'GHCR_TOKEN=' 'GHCR_OWNER='
   printf '%s\n' 'APP_BASE_URL=http://127.0.0.1:3000' 'API_BASE_URL=http://127.0.0.1:3001'
   printf '%s\n' 'SECURITY_CONTACT=security@localhost.invalid' 'PRIVACY_CONTACT=privacy@localhost.invalid'

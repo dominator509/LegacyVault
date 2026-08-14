@@ -8,7 +8,11 @@ export PYTHONUTF8=1 PYTHONIOENCODING=utf-8
   echo "ERROR: run contract-test.sh from the repository root" >&2
   exit 1
 }
-command -v uvx >/dev/null 2>&1 || {
+uvx_command=$(command -v uvx || command -v uvx.cmd || true)
+if [ -z "$uvx_command" ] && command -v where.exe >/dev/null 2>&1; then
+  uvx_command=$(where.exe uvx.cmd 2>/dev/null | head -n 1 | tr -d '\r' || true)
+fi
+[ -n "$uvx_command" ] || {
   echo "ERROR: uvx is required for the pinned Schemathesis contract gate" >&2
   exit 1
 }
@@ -78,7 +82,7 @@ done
   exit 1
 }
 
-uvx --from schemathesis==4.24.3 schemathesis run \
+"$uvx_command" --from schemathesis==4.24.3 schemathesis run \
   "$contract_origin/openapi.json" \
   --url "$contract_origin" \
   --phases coverage,fuzzing \

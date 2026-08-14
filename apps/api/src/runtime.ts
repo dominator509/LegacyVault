@@ -85,6 +85,26 @@ const aiInterviewSchema = z.object({
   followUpQuestion: z.string().min(1).max(500).nullable(),
 });
 
+async function boundedDependencyProbe(
+  operation: Promise<unknown>,
+  timeoutMs = 3_000,
+): Promise<"ready" | "unavailable"> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation.then(
+        () => "ready" as const,
+        () => "unavailable" as const,
+      ),
+      new Promise<"unavailable">((resolve) => {
+        timer = setTimeout(() => resolve("unavailable"), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 export function createApplicationRuntime(environment: Environment): {
   dependencies: ServerDependencies;
   observability: ObservabilityRuntime;
@@ -277,6 +297,26 @@ export function createApplicationRuntime(environment: Environment): {
     observability,
     dependencies: {
       observability,
+      readiness: async () => {
+        const dependencies = Object.fromEntries(
+          await Promise.all(
+            [
+              ["database", repository.healthCheck()],
+              ["queue", workflowQueue.waitUntilReady()],
+              ["object_storage", documentObjectStore.healthCheck()],
+            ].map(async ([name, operation]) => [
+              name as string,
+              await boundedDependencyProbe(operation as Promise<unknown>),
+            ]),
+          ),
+        );
+        return {
+          ready: Object.values(dependencies).every(
+            (status) => status === "ready",
+          ),
+          dependencies,
+        };
+      },
       repository,
       stripe,
       auth: authRuntime.auth,

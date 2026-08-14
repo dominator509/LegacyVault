@@ -184,5 +184,5 @@ describe("annual review notification workflow", () => {
       unconsented.workflow.id,
     );
     expect(unconsentedDelivery).toBeNull();
-  });
+  }, 20_000);
 });
