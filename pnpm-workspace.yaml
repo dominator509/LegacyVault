@@ -6,3 +6,14 @@ overrides:
   # GHSA-2v37-7h3g-55p8: nanoid <3.3.18 is pulled transitively via vitest > vite > postcss;
   # pin to the patched release so scripts/dependency-audit.sh (pnpm audit --audit-level high) passes.
   nanoid: 3.3.18
+  # fast-uri host-confusion / SSRF advisories (GHSA-5jgf-p345-68v8, GHSA-f65p-4m7j-42xc,
+  # GHSA-fph4-wmhf-6fwf, GHSA-jqff-g426-hqxp): pulled transitively via
+  # fastify > fast-json-stringify (4.x line) and @fastify/swagger > json-schema-resolver,
+  # ajv, @fastify/ajv-compiler (3.x line).
+  fast-json-stringify>fast-uri: 4.1.3
+  json-schema-resolver>fast-uri: 3.1.6
+  ajv>fast-uri: 3.1.6
+  "@fastify/ajv-compiler>fast-uri": 3.1.6
+  # sharp <0.35.4 bundles a vulnerable libheif (GHSA-rgj7-g3m4-5g8c); pulled via next's
+  # optionalDependencies (next 16.3.3 still declares ^0.35.3, so this needs its own pin).
+  sharp: 0.35.4
