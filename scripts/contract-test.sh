@@ -82,7 +82,11 @@ done
   exit 1
 }
 
-"$uvx_command" --from schemathesis==4.24.3 schemathesis run \
+# NOTE: schemathesis 4.24.3 calls `CanonicalSchema.is_satisfiable()`, which was
+# removed in jsonschema-rs >= 0.50.0 (renamed API). Pin jsonschema-rs to the
+# newest 0.49.x so the contract gate does not crash with
+# "AttributeError: 'builtins.CanonicalSchema' object has no attribute 'is_satisfiable'".
+"$uvx_command" --from schemathesis==4.24.3 --with jsonschema-rs==0.49.3 schemathesis run \
   "$contract_origin/openapi.json" \
   --url "$contract_origin" \
   --phases coverage,fuzzing \
